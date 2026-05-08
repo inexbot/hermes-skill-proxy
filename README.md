@@ -99,6 +99,27 @@ sudo systemctl status hermes-skill-proxy
                           └─────────────────┘
 ```
 
+## 问题日志
+
+每次收到用户问题时，proxy 自动记录到本地文件，用于分析和优化知识库覆盖。
+
+**记录文件**：`~/.hermes/kb/inexbot/questions.log`
+
+**记录格式**：每行一条 JSON
+```json
+{"time": "2026-05-08 16:30:00", "question": "工具手标定有几种方法"}
+```
+
+**查看最近记录**：
+```bash
+tail -20 ~/.hermes/kb/inexbot/questions.log
+```
+
+**统计高频问题**：
+```bash
+cat ~/.hermes/kb/inexbot/questions.log | jq -r .question | sort | uniq -c | sort -nr | head -20
+```
+
 ## License
 
 MIT
