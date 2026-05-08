@@ -1,0 +1,26 @@
+[Unit]
+Description=Hermes Skill Proxy — auto-inject skill into system prompt
+After=network.target hermes-gateway.service
+Wants=hermes-gateway.service
+
+[Service]
+Type=simple
+User=inexbot
+WorkingDirectory=/home/inexbot
+Environment=
+  PROXY_PORT=8643
+  HERMES_URL=http://localhost:8642
+  SKILL_NAME=inexbot-knowledge-base
+  # HERMES_API_KEY=your-api-key-here
+
+ExecStart=/usr/bin/python3 /home/inexbot/hermes-skill-proxy/hermes-skill-proxy.py
+Restart=always
+RestartSec=5
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-skill-proxy
+
+[Install]
+WantedBy=multi-user.target
