@@ -16,8 +16,11 @@ Hermes API Proxy — 自动注入 skill 到 system prompt
 import os
 import json
 import re
+from datetime import datetime
 from flask import Flask, request, Response
 import requests
+
+LOG_FILE = os.path.expanduser("~/.hermes/kb/inexbot/questions.log")
 
 app = Flask(__name__)
 
@@ -50,11 +53,34 @@ def load_skill_prompt():
 load_skill_prompt()
 
 
+def log_question(body):
+    """将用户问题记录到本地文件"""
+    try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        # 从 messages 中提取最后一条 user 消息
+        question = ""
+        for msg in reversed(body.get("messages", [])):
+            if msg.get("role") == "user":
+                question = msg.get("content", "")[:500]  # 截断超长问题
+                break
+        if question:
+            entry = {
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "question": question
+            }
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[proxy] log_question error: {e}")
+
+
 def proxy_request():
     if not request.is_json:
         return Response("application/json required", status=400)
 
     body = request.get_json()
+    log_question(body)
 
     # 从请求体或 header 获取 auth key
     auth = request.headers.get("Authorization", "")
