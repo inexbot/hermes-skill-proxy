@@ -59,11 +59,10 @@ sudo systemctl enable hermes-skill-proxy
 sudo systemctl start hermes-skill-proxy
 ```
 
-### 4. 克隆 skill（如需自动注入知识库）
+### 4. 爬取一次知识库（首次部署）
 
 ```bash
-SKILL_PATH="${HOME}/.hermes/skills/productivity/inexbot-knowledge-base"
-git clone https://github.com/inexbot/inexbot-knowledge-base.git "${SKILL_PATH}"
+python3 ~/.hermes/skills/productivity/inexbot-knowledge-base/scripts/crawler.py
 ```
 
 确保 skill 目录存在，否则 `skill_loaded` 为 `false`。可用以下命令验证：
@@ -71,7 +70,24 @@ git clone https://github.com/inexbot/inexbot-knowledge-base.git "${SKILL_PATH}"
 ls "${HOME}/.hermes/skills/productivity/inexbot-knowledge-base/SKILL.md"
 ```
 
-### 5. 验证
+### 5. 配置定时任务（每日 11:00 自动爬取）
+
+```bash
+cronjob action=create \
+  name="inexbot-knowledge-base daily crawl" \
+  prompt="爬取纳博特科技知识库 https://doc.inexbot.com
+
+步骤：
+1. 运行爬虫脚本：
+   python3 ~/.hermes/skills/productivity/inexbot-knowledge-base/scripts/crawler.py
+2. 检查输出 ~/.hermes/kb/inexbot/ 是否包含 index.json 和 md/ 目录
+3. 记录爬取结果（成功/失败/页数）" \
+  schedule="0 11 * * *" \
+  skills='["productivity/inexbot-knowledge-base"]' \
+  deliver=local
+```
+
+### 6. 验证
 
 ```bash
 curl http://localhost:8643/health
@@ -83,6 +99,16 @@ curl http://localhost:8643/health
 ```
 
 如 `skill_loaded` 为 `false`，检查 skill 目录是否正确克隆到 `${HOME}/.hermes/skills/productivity/inexbot-knowledge-base/`。
+
+验证知识库已爬取：
+```bash
+ls "${HOME}/.hermes/kb/inexbot/index.json"
+```
+
+验证定时任务已创建：
+```bash
+cronjob action=list | grep inexbot-knowledge-base
+```
 
 ## 一键部署
 

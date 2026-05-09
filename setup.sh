@@ -90,7 +90,7 @@ info "Step 1/6：克隆 hermes-skill-proxy..."
 git_clone_or_fetch "${PROXY_REPO}" "${PROXY_DIR}"
 
 # ---------- Step 2: 克隆 inexbot-knowledge-base ----------
-info "Step 2/6：克隆 inexbot-knowledge-base skill..."
+info "Step 2/7：克隆 inexbot-knowledge-base skill..."
 SKILL_PATH="${SKILLS_DIR}/${SKILL_NAME}"
 git_clone_or_fetch "${SKILL_REPO}" "${SKILL_PATH}"
 
@@ -99,12 +99,20 @@ if [[ ! -f "${SKILL_PATH}/SKILL.md" ]]; then
     warn "Skill 目录不存在或 SKILL.md 缺失：${SKILL_PATH}"
 fi
 
-# ---------- Step 3: 安装 Python 依赖 ----------
-info "Step 3/6：安装 Python 依赖（flask, requests）..."
+# ---------- Step 3: 爬取一次知识库 ----------
+info "Step 3/7：爬取知识库（首次部署）..."
+if [[ -f "${SKILL_PATH}/scripts/crawler.py" ]]; then
+    python3 "${SKILL_PATH}/scripts/crawler.py" && info "知识库爬取完成" || warn "知识库爬取失败，继续部署..."
+else
+    warn "爬虫脚本不存在，跳过：${SKILL_PATH}/scripts/crawler.py"
+fi
+
+# ---------- Step 4: 安装 Python 依赖 ----------
+info "Step 4/7：安装 Python 依赖（flask, requests）..."
 pip3 install flask requests -q && info "依赖安装完成" || error "pip install 失败"
 
-# ---------- Step 4: 安装 systemd 服务 ----------
-info "Step 4/6：安装 hermes-skill-proxy systemd 服务..."
+# ---------- Step 5: 安装 systemd 服务 ----------
+info "Step 5/7：安装 hermes-skill-proxy systemd 服务..."
 SERVICE_FILE="${PROXY_DIR}/hermes-skill-proxy.service"
 SERVICE_DEST="/etc/systemd/system/hermes-skill-proxy.service"
 
@@ -118,8 +126,8 @@ sudo -S -p '' cp /tmp/hermes-skill-proxy.service "${SERVICE_DEST}"
 sudo -S -p '' systemctl daemon-reload
 info "systemd 服务文件已安装"
 
-# ---------- Step 5: 启动服务 ----------
-info "Step 5/6：启动 hermes-skill-proxy 服务..."
+# ---------- Step 6: 启动服务 ----------
+info "Step 6/7：启动 hermes-skill-proxy 服务..."
 sudo -S -p '' systemctl enable hermes-skill-proxy
 sudo -S -p '' systemctl restart hermes-skill-proxy
 
@@ -133,8 +141,29 @@ else
   sudo journalctl -u hermes-skill-proxy -n 30"
 fi
 
-# ---------- Step 6: 验证 ----------
-info "Step 6/6：验证部署结果..."
+# ---------- Step 7: 配置每日定时爬取 ----------
+info "Step 7/7：配置每日 11:00 定时爬取任务..."
+CRON_PROMPT="爬取纳博特科技知识库 https://doc.inexbot.com
+
+步骤：
+1. 运行爬虫脚本：
+   python3 ~/.hermes/skills/productivity/inexbot-knowledge-base/scripts/crawler.py
+2. 检查输出 ~/.hermes/kb/inexbot/ 是否包含 index.json 和 md/ 目录
+3. 记录爬取结果（成功/失败/页数）"
+
+# 检查是否已存在同名定时任务
+EXISTING_JOB=$(cronjob action=list 2>/dev/null | grep -c "inexbot-knowledge-base daily crawl" || true)
+if [[ "${EXISTING_JOB}" -eq 0 ]]; then
+    # 创建定时任务（后台运行，不阻塞部署）
+    cronjob action=create \
+      name="inexbot-knowledge-base daily crawl" \
+      prompt="${CRON_PROMPT}" \
+      schedule="0 11 * * *" \
+      skills='["productivity/inexbot-knowledge-base"]' \
+      deliver=local >/dev/null 2>&1 && info "定时任务创建成功（每天 11:00）" || warn "定时任务创建失败"
+else
+    info "定时任务已存在，跳过"
+fi
 HEALTH=$(curl -sf --max-time 10 http://localhost:8643/health 2>&1) || true
 if [[ -z "${HEALTH}" ]]; then
     warn "health 检查未通过，请确认 Hermes Gateway 已在 localhost:8642 运行"
@@ -147,11 +176,19 @@ status = 'OK' if skill_ok else 'FAIL'
 skill_name = d.get('skill', '')
 print(f\"  skill_loaded : {status} ({skill_name})\")
 if not skill_ok:
-    print(f\"  WARNING: skill 未加载，请确认已执行：\")
-    print(f\"    git clone https://github.com/inexbot/inexbot-knowledge-base.git \${HOME}/.hermes/skills/productivity/inexbot-knowledge-base\")
-print(f\"  hermes_url   : {d.get('hermes_url')}\")
-print(f\"  status       : {d.get('status')}\")
+    print(f"  WARNING: skill 未加载，请确认已执行：")
+    print(f"    git clone https://github.com/inexbot/inexbot-knowledge-base.git \${HOME}/.hermes/skills/productivity/inexbot-knowledge-base")
+print(f"  hermes_url   : {d.get('hermes_url')}")
+print(f"  status       : {d.get('status')}")
 "
+fi
+
+# 验证定时任务
+CRON_JOB=$(cronjob action=list 2>/dev/null | grep "inexbot-knowledge-base daily crawl" || true)
+if [[ -n "${CRON_JOB}" ]]; then
+    echo "  cron job     : OK (inexbot-knowledge-base daily crawl)"
+else
+    echo "  cron job     : WARN (未找到定时任务，请手动检查)"
 fi
 
 # ---------- 完成 ----------
