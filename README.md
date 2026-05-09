@@ -91,7 +91,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/inexbot/hermes-skill-proxy/m
 |------|--------|------|
 | `PROXY_PORT` | `8643` | Proxy 监听端口 |
 | `HERMES_URL` | `http://localhost:8642` | Hermes Gateway 地址 |
-| `HERMES_API_KEY` | `(空)` | 与 Gateway api_key 一致时填入 |
+| `HERMES_API_KEY` | `hermes-website-search` | 与 Gateway api_key 一致时填入 |
 
 ### Gateway 与 Proxy 的对应关系
 
@@ -103,7 +103,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/inexbot/hermes-skill-proxy/m
 
 如果 Gateway 配置了 `api_key`，Proxy 启动时需要设置相同密钥：
 ```bash
-HERMES_API_KEY=your-key PROXY_PORT=8643 python hermes-skill-proxy.py
+HERMES_API_KEY=hermes-website-search PROXY_PORT=8643 python hermes-skill-proxy.py
 ```
 
 ## API 接口

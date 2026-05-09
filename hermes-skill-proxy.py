@@ -9,7 +9,7 @@ Hermes API Proxy — 自动注入 skill 到 system prompt
 环境变量:
   PROXY_PORT=8643
   HERMES_URL=http://localhost:8642
-  HERMES_API_KEY=xxx          # 如果 Hermes 开启了认证
+  HERMES_API_KEY=hermes-website-search          # 如果 Hermes 开启了认证
   SKILL_NAME=inexbot-knowledge-base
 """
 
@@ -25,7 +25,7 @@ LOG_FILE = os.path.expanduser("~/.hermes/kb/inexbot/questions.log")
 app = Flask(__name__)
 
 HERMES_URL = os.getenv("HERMES_URL", "http://localhost:8642")
-HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
+HERMES_API_KEY = os.getenv("HERMES_API_KEY", "hermes-website-search")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "8643"))
 SKILL_NAME = os.getenv("SKILL_NAME", "inexbot-knowledge-base")
 

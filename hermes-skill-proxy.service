@@ -10,7 +10,7 @@ WorkingDirectory=/home/inexbot
 Environment=
   PROXY_PORT=8643
   HERMES_URL=http://localhost:8642
-  HERMES_API_KEY=hermes-website-search-2025
+  HERMES_API_KEY=hermes-website-search
   SKILL_NAME=inexbot-knowledge-base
 
 ExecStart=/usr/bin/python3 /home/inexbot/hermes-skill-proxy/hermes-skill-proxy.py
