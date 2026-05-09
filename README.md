@@ -59,11 +59,16 @@ sudo systemctl enable hermes-skill-proxy
 sudo systemctl start hermes-skill-proxy
 ```
 
-### 4. 克隆 skill
+### 4. 克隆 skill（如需自动注入知识库）
 
 ```bash
 SKILL_PATH="${HOME}/.hermes/skills/productivity/inexbot-knowledge-base"
 git clone https://github.com/inexbot/inexbot-knowledge-base.git "${SKILL_PATH}"
+```
+
+确保 skill 目录存在，否则 `skill_loaded` 为 `false`。可用以下命令验证：
+```bash
+ls "${HOME}/.hermes/skills/productivity/inexbot-knowledge-base/SKILL.md"
 ```
 
 ### 5. 验证
@@ -76,6 +81,8 @@ curl http://localhost:8643/health
 ```json
 {"status": "ok", "skill": "inexbot-knowledge-base", "skill_loaded": true, "hermes_url": "http://localhost:8642"}
 ```
+
+如 `skill_loaded` 为 `false`，检查 skill 目录是否正确克隆到 `${HOME}/.hermes/skills/productivity/inexbot-knowledge-base/`。
 
 ## 一键部署
 

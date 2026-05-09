@@ -94,6 +94,11 @@ info "Step 2/6：克隆 inexbot-knowledge-base skill..."
 SKILL_PATH="${SKILLS_DIR}/${SKILL_NAME}"
 git_clone_or_fetch "${SKILL_REPO}" "${SKILL_PATH}"
 
+# 验证 skill 目录存在
+if [[ ! -f "${SKILL_PATH}/SKILL.md" ]]; then
+    warn "Skill 目录不存在或 SKILL.md 缺失：${SKILL_PATH}"
+fi
+
 # ---------- Step 3: 安装 Python 依赖 ----------
 info "Step 3/6：安装 Python 依赖（flask, requests）..."
 pip3 install flask requests -q && info "依赖安装完成" || error "pip install 失败"
@@ -137,8 +142,13 @@ else
     echo "${HEALTH}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-status = 'OK' if d.get('skill_loaded') else 'FAIL'
-print(f\"  skill_loaded : {status} ({d.get('skill')})\")
+skill_ok = d.get('skill_loaded') == True
+status = 'OK' if skill_ok else 'FAIL'
+skill_name = d.get('skill', '')
+print(f\"  skill_loaded : {status} ({skill_name})\")
+if not skill_ok:
+    print(f\"  WARNING: skill 未加载，请确认已执行：\")
+    print(f\"    git clone https://github.com/inexbot/inexbot-knowledge-base.git \${HOME}/.hermes/skills/productivity/inexbot-knowledge-base\")
 print(f\"  hermes_url   : {d.get('hermes_url')}\")
 print(f\"  status       : {d.get('status')}\")
 "
