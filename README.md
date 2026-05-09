@@ -106,15 +106,41 @@ bash <(curl -fsSL https://raw.githubusercontent.com/inexbot/hermes-skill-proxy/m
 HERMES_API_KEY=your-key PROXY_PORT=8643 python hermes-skill-proxy.py
 ```
 
-## API 端点
+## API 接口
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/v1/chat/completions` | POST | 代理 chat completions，自动注入 skill |
-| `/health` | GET | 健康检查，返回 skill 加载状态 |
+Proxy 监听 `:8643`，对外提供以下接口：
 
-### Health 响应示例
+### `POST /v1/chat/completions`
 
+OpenAI 兼容的 chat completions 接口。会自动将 skill 内容注入到 system prompt，再转发给 Hermes Gateway。
+
+**请求头**
+```
+Content-Type: application/json
+Authorization: Bearer <HERMES_API_KEY>   # 仅当 Gateway 配置了 api_key 时需要
+```
+
+**请求体**（OpenAI 格式）
+```json
+{
+  "model": "MiniMax-M2.7",
+  "messages": [
+    {"role": "system", "content": "你是一个助手"},
+    {"role": "user", "content": "工具手标定有几种方法？"}
+  ],
+  "stream": true
+}
+```
+
+**响应**：流式返回，与 Hermes Gateway 的响应完全一致。
+
+---
+
+### `GET /health`
+
+健康检查接口。
+
+**响应**
 ```json
 {
   "status": "ok",
@@ -123,6 +149,30 @@ HERMES_API_KEY=your-key PROXY_PORT=8643 python hermes-skill-proxy.py
   "hermes_url": "http://localhost:8642"
 }
 ```
+
+| 字段 | 说明 |
+|------|------|
+| `status` | `"ok"` 表示 Proxy 正常运行 |
+| `skill` | 当前注入的 skill 名称 |
+| `skill_loaded` | `true` = skill 已加载；`false` = 未找到 skill 目录 |
+| `hermes_url` | Hermes Gateway 的地址 |
+
+---
+
+### 与原生 OpenAI API 的兼容性
+
+Proxy 完全兼容 OpenAI Chat Completions API，客户端可直接替换 base URL：
+
+| 对比项 | 原生 Hermes | 经由 Proxy |
+|--------|-----------|-----------|
+| Base URL | `http://localhost:8642/v1` | `http://localhost:8643/v1` |
+| 认证 | `Authorization` header | 同左 |
+| 请求格式 | OpenAI 格式 | OpenAI 格式 |
+| stream | 支持 | 支持 |
+
+客户端只需把 base URL 从 `8642` 改成 `8643`，其余代码无需修改。
+
+## 运维命令
 
 ## 部署架构图
 
