@@ -36,9 +36,20 @@ def load_skill_prompt():
     global SKILL_PROMPT
     try:
         import sys
-        sys.path.insert(0, os.path.expanduser("~/.hermes/hermes-agent"))
-        from agent.skill_commands import build_preloaded_skills_prompt
-        prompt, loaded, missing = build_preloaded_skills_prompt([SKILL_NAME], task_id=None)
+        import importlib.util
+        hermes_agent_path = os.path.expanduser("~/.hermes/hermes-agent")
+        spec = importlib.util.find_spec("agent.skill_commands", hermes_agent_path)
+        if spec is None:
+            print(f"[proxy] WARNING: agent.skill_commands not found in {hermes_agent_path}")
+            return
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["agent.skill_commands"] = module
+        spec.loader.exec_module(module)
+        build_fn = getattr(module, "build_preloaded_skills_prompt", None)
+        if not build_fn:
+            print(f"[proxy] WARNING: build_preloaded_skills_prompt not found in agent.skill_commands")
+            return
+        prompt, loaded, missing = build_fn([SKILL_NAME], task_id=None)
         if loaded:
             SKILL_PROMPT = (
                 "【自动加载的 Skill 指令】\n\n"
