@@ -16,48 +16,51 @@ Proxy 在收到 `/v1/chat/completions` 请求时，读取 Hermes 本地的 skill
 
 当收到指令"帮我部署 https://github.com/inexbot/hermes-skill-proxy"时，执行以下步骤。
 
-### Step 1: 部署 Hermes Gateway（如果没有）
+### Step 1: 确认 Hermes Gateway 已运行
 
 ```bash
-# 安装 Hermes Gateway（如果没有）
-[ -d "${HOME}/hermes-gateway" ] || git clone https://github.com/nousresearch/hermes-gateway.git "${HOME}/hermes-gateway"
-
-# 安装依赖
-cd "${HOME}/hermes-gateway" && pip install -r requirements.txt
-
-# 配置 Gateway（默认监听 8642）
-# 配置项：config.yaml 或环境变量
-# 关键配置：
-#   server.port: 8642
-#   server.host: 0.0.0.0
-
-# 安装 systemd 服务
-[ -f "${HOME}/hermes-gateway/hermes-gateway.service" ] && {
-  sed "s|/home/inexbot|${HOME}|g" "${HOME}/hermes-gateway/hermes-gateway.service" > /tmp/hermes-gateway.service
-  sudo cp /tmp/hermes-gateway.service /etc/systemd/system/hermes-gateway.service
-  sudo systemctl daemon-reload
-  sudo systemctl enable hermes-gateway
-  sudo systemctl start hermes-gateway
-}
-
-# 确认 Gateway 运行
-sleep 2 && curl -s http://localhost:8642/health || ss -tlnp | grep 8642
+# 检查 Gateway 是否运行在 8642
+ss -tlnp | grep 8642 || sudo systemctl status hermes-gateway
 ```
 
-### Step 2: 克隆 hermes-skill-proxy
+如果没有运行，先启动 Hermes Gateway。
+
+### Step 2: 配置 Hermes Gateway API Server
+
+确保 Gateway 的 API Server 配置正确：
+
+```yaml
+# config.yaml 或对应配置文件
+server:
+  port: 8642        # Gateway 监听端口
+  host: 0.0.0.0      # 允许外部访问
+  api_key: ""        # 如需认证，留空或填入密钥
+```
+
+配置完成后重启 Gateway 使配置生效：
+```bash
+sudo systemctl restart hermes-gateway
+```
+
+确认 Gateway 正常运行：
+```bash
+curl http://localhost:8642/health
+```
+
+### Step 3: 克隆 hermes-skill-proxy
 
 ```bash
 PROXY_DIR="${HOME}/hermes-skill-proxy"
 git clone https://github.com/inexbot/hermes-skill-proxy.git "${PROXY_DIR}"
 ```
 
-### Step 3: 安装依赖
+### Step 4: 安装依赖
 
 ```bash
 pip3 install flask requests
 ```
 
-### Step 4: 克隆 skill（可选，如果需要自动注入知识库）
+### Step 5: 克隆 skill（可选，如果需要自动注入知识库）
 
 ```bash
 SKILL_NAME="inexbot-knowledge-base"
@@ -65,7 +68,7 @@ SKILL_PATH="${HOME}/.hermes/skills/productivity/${SKILL_NAME}"
 git clone https://github.com/inexbot/inexbot-knowledge-base.git "${SKILL_PATH}"
 ```
 
-### Step 5: 安装 systemd 服务
+### Step 6: 安装 systemd 服务
 
 ```bash
 SERVICE_FILE="${PROXY_DIR}/hermes-skill-proxy.service"
@@ -77,14 +80,14 @@ sudo cp /tmp/hermes-skill-proxy.service "${SERVICE_DEST}"
 sudo systemctl daemon-reload
 ```
 
-### Step 6: 启动并启用服务
+### Step 7: 启动并启用服务
 
 ```bash
 sudo systemctl enable hermes-skill-proxy
 sudo systemctl start hermes-skill-proxy
 ```
 
-### Step 7: 验证
+### Step 8: 验证
 
 ```bash
 curl http://localhost:8643/health
@@ -99,6 +102,19 @@ curl http://localhost:8643/health
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/inexbot/hermes-skill-proxy/main/setup.sh)
+```
+
+## Proxy 与 Gateway 的配置关系
+
+| 配置项 | Gateway (8642) | Proxy (8643) |
+|--------|----------------|--------------|
+| 端口 | 8642 | 8643 |
+| 地址 | localhost | localhost |
+| api_key | 与 Proxy 的 HERMES_API_KEY 一致 | 环境变量传入 |
+
+如果 Gateway 配置了 `api_key`，Proxy 启动时需要设置相同密钥：
+```bash
+HERMES_API_KEY=your-key python hermes-skill-proxy.py
 ```
 
 ## 手动部署（自己用）
