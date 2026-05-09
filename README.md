@@ -46,7 +46,7 @@ gateway:
     enabled: true
     host: 127.0.0.1
     port: 8642
-    api_key: ""          # 如需认证则填入密钥，留空则无认证
+    api_key: "hermes-website-search"          # 如需认证则填入密钥，留空则无认证
 ```
 
 确认 Hermes Gateway 配置生效：
