@@ -85,12 +85,44 @@ if ! command -v systemctl &>/dev/null; then
     error "未找到 systemctl，本脚本需要在支持 systemd 的 Linux 上运行"
 fi
 
-# ---------- Step 1: 克隆 hermes-skill-proxy ----------
-info "Step 1/6：克隆 hermes-skill-proxy..."
+# ---------- Step 1: 检查并配置 npm 和 pip ----------
+info "Step 1/8：检查 npm 和 pip..."
+
+# 检测 pip
+if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
+    warn "pip 未安装，尝试安装..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y python3-pip >/dev/null 2>&1 && info "pip 安装完成" || warn "pip 安装失败"
+    else
+        warn "无法自动安装 pip，请手动安装"
+    fi
+fi
+
+# 检测 npm
+if ! command -v npm &>/dev/null; then
+    warn "npm 未安装，尝试安装..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y npm >/dev/null 2>&1 && info "npm 安装完成" || warn "npm 安装失败"
+    elif command -v brew &>/dev/null; then
+        brew install node >/dev/null 2>&1 && info "npm 安装完成" || warn "npm 安装失败"
+    else
+        warn "无法自动安装 npm，请手动安装"
+    fi
+fi
+
+# 配置 npm 镜像
+if command -v npm &>/dev/null; then
+    npm config set registry https://registry.npmmirror.com/ 2>/dev/null && info "npm 镜像配置完成" || warn "npm 镜像配置失败"
+fi
+
+# 配置 pip 镜像
+if command -v pip3 &>/dev/null; then
+# ---------- Step 2: 克隆 hermes-skill-proxy ----------
+info "Step 2/8：克隆 hermes-skill-proxy..."
 git_clone_or_fetch "${PROXY_REPO}" "${PROXY_DIR}"
 
-# ---------- Step 2: 克隆 inexbot-knowledge-base ----------
-info "Step 2/7：克隆 inexbot-knowledge-base skill..."
+# ---------- Step 3: 克隆 inexbot-knowledge-base ----------
+info "Step 3/8：克隆 inexbot-knowledge-base skill..."
 SKILL_PATH="${SKILLS_DIR}/${SKILL_NAME}"
 git_clone_or_fetch "${SKILL_REPO}" "${SKILL_PATH}"
 
@@ -99,20 +131,20 @@ if [[ ! -f "${SKILL_PATH}/SKILL.md" ]]; then
     warn "Skill 目录不存在或 SKILL.md 缺失：${SKILL_PATH}"
 fi
 
-# ---------- Step 3: 爬取一次知识库 ----------
-info "Step 3/7：爬取知识库（首次部署）..."
+# ---------- Step 4: 爬取一次知识库 ----------
+info "Step 4/8：爬取知识库（首次部署）..."
 if [[ -f "${SKILL_PATH}/scripts/crawler.py" ]]; then
     python3 "${SKILL_PATH}/scripts/crawler.py" && info "知识库爬取完成" || warn "知识库爬取失败，继续部署..."
 else
     warn "爬虫脚本不存在，跳过：${SKILL_PATH}/scripts/crawler.py"
 fi
 
-# ---------- Step 4: 安装 Python 依赖 ----------
-info "Step 4/7：安装 Python 依赖（flask, requests）..."
+# ---------- Step 5: 安装 Python 依赖 ----------
+info "Step 5/8：安装 Python 依赖（flask, requests）..."
 pip3 install flask requests -q && info "依赖安装完成" || error "pip install 失败"
 
-# ---------- Step 5: 安装 systemd 服务 ----------
-info "Step 5/7：安装 hermes-skill-proxy systemd 服务..."
+# ---------- Step 6: 安装 systemd 服务 ----------
+info "Step 6/8：安装 hermes-skill-proxy systemd 服务..."
 SERVICE_FILE="${PROXY_DIR}/hermes-skill-proxy.service"
 SERVICE_DEST="/etc/systemd/system/hermes-skill-proxy.service"
 
@@ -126,8 +158,8 @@ sudo -S -p '' cp /tmp/hermes-skill-proxy.service "${SERVICE_DEST}"
 sudo -S -p '' systemctl daemon-reload
 info "systemd 服务文件已安装"
 
-# ---------- Step 6: 启动服务 ----------
-info "Step 6/7：启动 hermes-skill-proxy 服务..."
+# ---------- Step 7: 启动服务 ----------
+info "Step 7/8：启动 hermes-skill-proxy 服务..."
 sudo -S -p '' systemctl enable hermes-skill-proxy
 sudo -S -p '' systemctl restart hermes-skill-proxy
 
@@ -141,8 +173,8 @@ else
   sudo journalctl -u hermes-skill-proxy -n 30"
 fi
 
-# ---------- Step 7: 配置每日定时爬取 ----------
-info "Step 7/7：配置每日 11:00 定时爬取任务..."
+# ---------- Step 8: 配置每日定时爬取 ----------
+info "Step 8/8：配置每日 11:00 定时爬取任务..."
 CRON_PROMPT="爬取纳博特科技知识库 https://doc.inexbot.com
 
 步骤：

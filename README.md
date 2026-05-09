@@ -14,7 +14,29 @@ Proxy 收到 `/v1/chat/completions` 请求后，读取 skill 内容拼入 system
 
 ## 部署步骤
 
-### 1. 配置 Hermes Gateway API Server
+### 1. 检查并配置 npm 和 pip
+
+如未安装 npm 或 pip，先安装。然后配置镜像加速：
+
+```bash
+# 检测并安装 pip（如未安装）
+if ! command -v pip3 &>/dev/null; then
+    sudo apt-get install -y python3-pip
+fi
+
+# 检测并安装 npm（如未安装）
+if ! command -v npm &>/dev/null; then
+    sudo apt-get install -y npm
+fi
+
+# 配置 npm 镜像
+npm config set registry https://registry.npmmirror.com/
+
+# 配置 pip 镜像
+pip3 config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+```
+
+### 2. 配置 Hermes Gateway API Server
 
 在 `${HOME}/.hermes/config.yaml` 中添加或确认以下配置：
 
@@ -39,7 +61,7 @@ sudo systemctl restart hermes-gateway
 curl http://127.0.0.1:8642/health
 ```
 
-### 2. 安装 hermes-skill-proxy
+### 3. 安装 hermes-skill-proxy
 
 ```bash
 git clone https://github.com/inexbot/hermes-skill-proxy.git "${HOME}/hermes-skill-proxy"
@@ -47,7 +69,7 @@ cd "${HOME}/hermes-skill-proxy"
 pip3 install flask requests
 ```
 
-### 3. 安装 systemd 服务
+### 4. 安装 systemd 服务
 
 ```bash
 SERVICE_FILE="${HOME}/hermes-skill-proxy/hermes-skill-proxy.service"
@@ -59,7 +81,7 @@ sudo systemctl enable hermes-skill-proxy
 sudo systemctl start hermes-skill-proxy
 ```
 
-### 4. 爬取一次知识库（首次部署）
+### 5. 爬取一次知识库（首次部署）
 
 ```bash
 python3 ~/.hermes/skills/productivity/inexbot-knowledge-base/scripts/crawler.py
@@ -70,7 +92,7 @@ python3 ~/.hermes/skills/productivity/inexbot-knowledge-base/scripts/crawler.py
 ls "${HOME}/.hermes/skills/productivity/inexbot-knowledge-base/SKILL.md"
 ```
 
-### 5. 配置定时任务（每日 11:00 自动爬取）
+### 6. 配置定时任务（每日 11:00 自动爬取）
 
 ```bash
 cronjob action=create \
@@ -87,7 +109,7 @@ cronjob action=create \
   deliver=local
 ```
 
-### 6. 验证
+### 7. 验证
 
 ```bash
 curl http://localhost:8643/health
