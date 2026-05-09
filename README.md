@@ -2,27 +2,82 @@
 
 Hermes API Proxy — 自动注入 skill 到 system prompt，**不修改 Hermes 源码**。
 
-## 原理
+## 架构
 
 ```
-客户端 → Proxy (:8643) → Hermes API Server (:8642)
+客户端 → Proxy (:8643) → Hermes Gateway (:8642)
               ↓
-         自动注入 skill 到 system prompt
+        自动注入 skill 到 system prompt
 ```
 
 Proxy 在收到 `/v1/chat/completions` 请求时，读取 Hermes 本地的 skill 内容，拼接进 system prompt 再转发给 Hermes。从客户端视角完全透明。
 
-## 依赖
+## 自动部署（另一个 Hermes 执行）
 
-- Python 3.8+
-- Flask
-- requests
+当收到指令"帮我部署 https://github.com/inexbot/hermes-skill-proxy"时，执行以下步骤：
+
+### Step 1: 克隆仓库
+
+```bash
+PROXY_DIR="${HOME}/hermes-skill-proxy"
+SKILL_NAME="inexbot-knowledge-base"
+SKILL_PATH="${HOME}/.hermes/skills/productivity/${SKILL_NAME}"
+
+git clone https://github.com/inexbot/hermes-skill-proxy.git "${PROXY_DIR}"
+git clone https://github.com/inexbot/inexbot-knowledge-base.git "${SKILL_PATH}"
+```
+
+### Step 2: 安装依赖
+
+```bash
+pip3 install flask requests
+```
+
+### Step 3: 安装 systemd 服务
+
+```bash
+SERVICE_FILE="${PROXY_DIR}/hermes-skill-proxy.service"
+SERVICE_DEST="/etc/systemd/system/hermes-skill-proxy.service"
+
+# 将服务文件中的 /home/inexbot 替换为实际用户目录
+sed "s|/home/inexbot|${HOME}|g" "${SERVICE_FILE}" > /tmp/hermes-skill-proxy.service
+sudo cp /tmp/hermes-skill-proxy.service "${SERVICE_DEST}"
+sudo systemctl daemon-reload
+```
+
+### Step 4: 启动并启用服务
+
+```bash
+sudo systemctl enable hermes-skill-proxy
+sudo systemctl start hermes-skill-proxy
+```
+
+### Step 5: 验证
+
+```bash
+curl http://localhost:8643/health
+```
+
+期望返回：
+```json
+{"status": "ok", "skill": "inexbot-knowledge-base", "skill_loaded": true, "hermes_url": "http://localhost:8642"}
+```
+
+### 一键部署（等效于上面 5 个步骤）
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/inexbot/hermes-skill-proxy/main/setup.sh)
+```
+
+## 手动部署（自己用）
+
+### 依赖
 
 ```bash
 pip install flask requests
 ```
 
-## 环境变量
+### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -31,7 +86,7 @@ pip install flask requests
 | `HERMES_API_KEY` | `(空)` | Hermes 认证密钥，如有需要 |
 | `SKILL_NAME` | `inexbot-knowledge-base` | 要自动注入的 skill 名称 |
 
-## 快速开始
+### 运行
 
 ```bash
 # 前台运行
@@ -41,22 +96,13 @@ python hermes-skill-proxy.py
 HERMES_URL=http://localhost:8642 PROXY_PORT=8643 python hermes-skill-proxy.py
 ```
 
-## systemd 部署
+### systemd 部署
 
 ```bash
-# 复制服务文件
 sudo cp hermes-skill-proxy.service /etc/systemd/system/
-
-# 重载 systemd
 sudo systemctl daemon-reload
-
-# 启用开机启动
 sudo systemctl enable hermes-skill-proxy
-
-# 启动服务
 sudo systemctl start hermes-skill-proxy
-
-# 查看状态
 sudo systemctl status hermes-skill-proxy
 ```
 
@@ -118,6 +164,22 @@ tail -20 ~/.hermes/kb/inexbot/questions.log
 **统计高频问题**：
 ```bash
 cat ~/.hermes/kb/inexbot/questions.log | jq -r .question | sort | uniq -c | sort -nr | head -20
+```
+
+## 运维命令
+
+```bash
+# 查看服务状态
+sudo systemctl status hermes-skill-proxy
+
+# 查看实时日志
+sudo journalctl -u hermes-skill-proxy -f
+
+# 重启服务
+sudo systemctl restart hermes-skill-proxy
+
+# 查看 health
+curl http://localhost:8643/health
 ```
 
 ## License
