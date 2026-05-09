@@ -59,7 +59,7 @@ sudo systemctl enable hermes-skill-proxy
 sudo systemctl start hermes-skill-proxy
 ```
 
-### 4. 克隆 skill（如需自动注入知识库）
+### 4. 克隆 skill
 
 ```bash
 SKILL_PATH="${HOME}/.hermes/skills/productivity/inexbot-knowledge-base"
