@@ -1,6 +1,8 @@
 """
-Hermes API Proxy — 自动注入 skill 到 system prompt
-不修改 Hermes 源码，只做请求转发和 prompt 注入
+Hermes API Proxy — 自动检索知识库 + 注入 system prompt
+
+启动时加载 index.json 到内存，每 5 小时自动重载。
+每次请求在内存中做关键词匹配（毫秒级），不跑子进程。
 
 用法:
   python hermes-skill-proxy.py
@@ -9,81 +11,164 @@ Hermes API Proxy — 自动注入 skill 到 system prompt
 环境变量:
   PROXY_PORT=8643
   HERMES_URL=http://localhost:8642
-  HERMES_API_KEY=hermes-website-search          # 如果 Hermes 开启了认证
-  SKILL_NAME=inexbot-knowledge-base
+  HERMES_API_KEY=hermes-website-search
 """
 
 import os
 import json
-import re
+import time
+import threading
 from datetime import datetime
+from pathlib import Path
+
 from flask import Flask, request, Response
 import requests
+import jieba
 
-LOG_FILE = os.path.expanduser("~/.hermes/kb/inexbot/questions.log")
-
-app = Flask(__name__)
+# ── 配置 ──────────────────────────────────────────────────────────────────
 
 HERMES_URL = os.getenv("HERMES_URL", "http://localhost:8642")
 HERMES_API_KEY = os.getenv("HERMES_API_KEY", "hermes-website-search")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "8643"))
-SKILL_NAME = os.getenv("SKILL_NAME", "inexbot-knowledge-base")
 
-# 预加载 skill 内容（启动时加载一次）
-SKILL_PROMPT = None
+KB_ROOT = Path.home() / ".hermes" / "kb" / "inexbot"
+INDEX_FILE = KB_ROOT / "index.json"
+BASE_URL = "https://doc.inexbot.com"
+LOG_FILE = KB_ROOT / "questions.log"
+RELOAD_INTERVAL = 5 * 3600  # 5 小时
 
-def load_skill_prompt():
-    global SKILL_PROMPT
+# ── 知识库内存索引 ────────────────────────────────────────────────────────
+
+# 预计算的数据结构
+_index_data: dict = {}          # 原始 index.json 内容
+_doc_scores: dict = {}          # path → {"title_tokens": set, "desc_tokens": set, "word_counts": dict}
+
+def load_index():
+    """加载 index.json 并预计算检索所需的数据结构"""
+    global _index_data, _doc_scores
+
+    if not INDEX_FILE.exists():
+        print(f"[proxy] WARNING: index.json not found at {INDEX_FILE}")
+        _index_data = {}
+        _doc_scores = {}
+        return
+
+    with open(INDEX_FILE, encoding="utf-8") as f:
+        _index_data = json.load(f)
+
+    _doc_scores = {}
+    for path, item in _index_data.items():
+        title_words = set(jieba.cut(item.get("title", "")))
+        title_words = {w for w in title_words if len(w) >= 2}
+        desc_words = set(jieba.cut(item.get("description", "")))
+        desc_words = {w for w in desc_words if len(w) >= 2}
+        _doc_scores[path] = {
+            "title_tokens": title_words,
+            "desc_tokens": desc_words,
+            "word_counts": item.get("word_counts", {}),
+        }
+
+    print(f"[proxy] Index loaded: {len(_index_data)} docs")
+
+load_index()
+
+# ── 定时重载 ──────────────────────────────────────────────────────────────
+
+def schedule_reload():
+    load_index()
+    threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
+
+# 启动 5 小时后的第一次重载
+threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
+
+# ── 内存检索 ──────────────────────────────────────────────────────────────
+
+def search_kb(query: str, top_k: int = 5) -> list:
+    """在内存索引中检索相关文档，返回 top_k 条"""
+    if not _doc_scores:
+        return []
+
+    query_words = set(jieba.cut(query))
+    query_words = {w for w in query_words if len(w) >= 2}
+
+    scores = {}
+    for path, ds in _doc_scores.items():
+        score = 0.0
+        for w in query_words:
+            if w in ds["title_tokens"]:
+                score += 4
+            if w in ds["desc_tokens"]:
+                score += 2
+            if w in ds["word_counts"]:
+                score += 0.5 * ds["word_counts"][w]
+
+        if score > 0:
+            scores[path] = score
+
+    ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
+    return [_index_data[path] for path, _ in ranked]
+
+
+def format_kb_results(results: list) -> str:
+    """格式化检索结果为 prompt 文本"""
+    if not results:
+        return ""
+
+    lines = [
+        "",
+        "【知识库检索结果】",
+        f"以下是从纳博特文档库中检索到的 {len(results)} 篇相关内容，请直接基于这些内容回答用户问题：",
+        "",
+    ]
+
+    for i, item in enumerate(results, 1):
+        title = item.get("title", "")
+        path = item.get("path", "")
+        url = BASE_URL + path
+        desc = item.get("description", "")
+        snippet = item.get("content_snippet", "")[:800]
+
+        lines.append(f"--- 文档 {i} ---")
+        lines.append(f"标题：{title}")
+        lines.append(f"链接：{url}")
+        if desc:
+            lines.append(f"简介：{desc}")
+        if snippet:
+            lines.append(f"正文摘要：{snippet}")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("【回答要求】")
+    lines.append("1. 直接基于上面检索到的知识库内容回答，不要凭记忆猜测")
+    lines.append("2. 如果检索内容足以回答问题，给出完整答案；如果内容覆盖不足，明确说明'文档中未找到完整信息'并基于已有内容给出部分答案")
+    lines.append("3. 答案末尾必须列出所有引用过的文档链接，格式为：📄 原文：标题 | 链接")
+    lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 格式")
+
+    return "\n".join(lines)
+
+
+# ── 日志记录 ──────────────────────────────────────────────────────────────
+
+def log_question(body: dict):
     try:
-        import sys
-        import importlib.util
-        hermes_agent_path = os.path.expanduser("~/.hermes/hermes-agent")
-        spec = importlib.util.find_spec("agent.skill_commands", hermes_agent_path)
-        if spec is None:
-            print(f"[proxy] WARNING: agent.skill_commands not found in {hermes_agent_path}")
-            return
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["agent.skill_commands"] = module
-        spec.loader.exec_module(module)
-        build_fn = getattr(module, "build_preloaded_skills_prompt", None)
-        if not build_fn:
-            print(f"[proxy] WARNING: build_preloaded_skills_prompt not found in agent.skill_commands")
-            return
-        prompt, loaded, missing = build_fn([SKILL_NAME], task_id=None)
-        if loaded:
-            SKILL_PROMPT = (
-                "【自动加载的 Skill 指令】\n\n"
-                + prompt
-            )
-            print(f"[proxy] Skill '{SKILL_NAME}' loaded, {len(SKILL_PROMPT)} chars")
-        else:
-            print(f"[proxy] WARNING: Skill '{SKILL_NAME}' not found, missing: {missing}")
-    except Exception as e:
-        print(f"[proxy] ERROR loading skill: {e}")
-
-load_skill_prompt()
-
-
-def log_question(body):
-    """将用户问题记录到本地文件"""
-    try:
-        # 确保目录存在
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        # 从 messages 中提取最后一条 user 消息
         question = ""
         for msg in reversed(body.get("messages", [])):
             if msg.get("role") == "user":
-                question = msg.get("content", "")[:500]  # 截断超长问题
+                question = msg.get("content", "")[:500]
                 break
         if question:
-            entry = {
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "question": question
-            }
+            entry = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "question": question}
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"[proxy] log_question error: {e}")
+
+
+# ── 核心代理逻辑 ──────────────────────────────────────────────────────────
+
+app = Flask(__name__)
 
 
 def proxy_request():
@@ -93,33 +178,56 @@ def proxy_request():
     body = request.get_json()
     log_question(body)
 
-    # 从请求体或 header 获取 auth key
+    # 提取用户问题
+    user_question = ""
+    for msg in reversed(body.get("messages", [])):
+        if msg.get("role") == "user":
+            user_question = msg.get("content", "")
+            break
+
+    # 内存检索知识库
+    kb_results = search_kb(user_question, top_k=5)
+    kb_context = format_kb_results(kb_results) if kb_results else ""
+
+    # 构建 system prompt
+    if kb_context:
+        # 有检索结果：注入真实内容
+        system_prompt = (
+            "你是一个专业的纳博特科技（iNexBot）工业机器人AI助手，你可以直接使用下面的检索内容回答问题。\n"
+            + kb_context
+        )
+    else:
+        # 无检索结果：通用提示
+        system_prompt = (
+            "你是一个专业的纳博特科技（iNexBot）工业机器人AI助手。\n"
+            "回答要求：\n"
+            "1. 如果你了解纳博特相关产品和技术，直接回答\n"
+            "2. 如果不确定，建议用户查阅 https://doc.inexbot.com 或联系技术支持\n"
+            "3. 使用简洁专业的技术语言，适当使用 Markdown 格式来组织回答\n"
+            "4. 不要出现 ~/workspace 或任何本地路径\n"
+            "5. 链接必须是 https://doc.inexbot.com/ 或 https://www.inexbot.com 开头"
+        )
+
+    # 从请求体获取 auth
     auth = request.headers.get("Authorization", "")
     if HERMES_API_KEY and not auth:
         auth = f"Bearer {HERMES_API_KEY}"
 
-    # 注入 system prompt
-    skill_block = SKILL_PROMPT or ""
-
-    # 处理 messages 中的 system 消息
-    modified = False
+    # 注入 system prompt（替换或插入）
     new_messages = []
+    has_system = False
     for msg in body.get("messages", []):
         if msg.get("role") == "system":
-            modified = True
+            has_system = True
             new_messages.append({
                 **msg,
-                "content": skill_block + "\n\n" + (msg.get("content") or "")
+                "content": system_prompt + "\n\n" + (msg.get("content") or "")
             })
         else:
             new_messages.append(msg)
 
-    if not modified:
-        # 没有 system 消息，在最前面插入
-        new_messages.insert(0, {
-            "role": "system",
-            "content": skill_block
-        })
+    if not has_system:
+        new_messages.insert(0, {"role": "system", "content": system_prompt})
 
     new_body = {**body, "messages": new_messages}
 
@@ -157,8 +265,8 @@ def chat_completions():
 def health():
     return Response(json.dumps({
         "status": "ok",
-        "skill": SKILL_NAME,
-        "skill_loaded": SKILL_PROMPT is not None,
+        "index_docs": len(_index_data),
+        "index_loaded": len(_index_data) > 0,
         "hermes_url": HERMES_URL,
     }), status=200)
 
@@ -166,5 +274,6 @@ def health():
 if __name__ == "__main__":
     print(f"[proxy] Starting Hermes Skill Proxy on port {PROXY_PORT}")
     print(f"[proxy] Forwarding to {HERMES_URL}")
-    print(f"[proxy] Auto-injecting skill: {SKILL_NAME}")
+    print(f"[proxy] Index: {len(_index_data)} docs loaded")
+    print(f"[proxy] Reload interval: {RELOAD_INTERVAL}s ({RELOAD_INTERVAL/3600}h)")
     app.run(host="0.0.0.0", port=PROXY_PORT, threaded=True)
