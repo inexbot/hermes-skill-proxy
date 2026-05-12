@@ -55,7 +55,7 @@ KB_CONFIGS = [
 
 LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
-TOP_K = 4  # 每个知识库取 top-k 条结果（太少漏信息，太多引入噪音）
+TOP_K = 3  # 每个知识库取 top-k 条结果
 
 # ── 知识库内存索引 ────────────────────────────────────────────────────────
 
@@ -137,8 +137,6 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
                 score += 4
             if w in item_ds["desc_tokens"]:
                 score += 2
-            if w in item_ds["content_tokens"]:
-                score += 1
             if w in item_ds["word_counts"]:
                 score += 0.5 * item_ds["word_counts"][w]
         if score > 0:
