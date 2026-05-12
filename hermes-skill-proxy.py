@@ -59,21 +59,30 @@ TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空
 
 # 问题类型关键词（用于定向搜索知识库）
 SYSTEM_KEYWORDS = {
-    "标定", "焊接", "配置", "操作", "参数", "控制器", "示教器", "通讯",
+    "标定", "焊接", "控制器", "示教器", "通讯",
     "总线", "故障", "报错", "版本", "规格", "选型", "码垛", "喷涂",
     "冲压", "打磨", "切割", "搬运", "传送带", "视觉", "传感器",
-    "坐标系", "运动", "指令", "变量", "工艺", "伺服", "安全",
+    "坐标系", "运动", "变量", "工艺", "伺服", "安全",
     "安装", "接线", "维护", "保养", "零点", "电机", "编码器",
-    "IO", "Modbus", "EtherCAT", "Ethernet", "CAN", "Profinet",
+    "Modbus", "EtherCAT", "Ethernet", "CAN", "Profinet",
+    "IO", "急停", "使能", "手轮", "面板", "复位",
 }
 
-DEV_KEYWORDS = {
-    "API", "二次开发", "JSON", "ROS", "SDK", "HAL", "接口",
-    "自定义", "示例", "Demo", "教程", "上位机", "主站库",
-    "协议解析", "端口协议", "功能码", "开发", "编程",
-    "C++", "Python", "C#", "源码", "GitHub", "回调",
-    "线程", "socket", "WebSocket", "HTTP", "gRPC", "插件",
+# 强开发关键词（命中任一即强制走 open）
+STRONG_DEV_KEYWORDS = {
+    "JSON", "API", "二次开发", "ROS", "SDK", "HAL",
+    "JSON协议", "端口协议", "协议解析", "自定义指令", "上位机",
+    "主站库", "C++", "Python", "C#", "回调", "socket",
+    "源码", "GitHub", "插件", "SDK",
 }
+
+# 弱开发关键词（和系统词共存时才走 open）
+WEAK_DEV_KEYWORDS = {
+    "接口", "示例", "Demo", "教程", "功能码", "开发", "编程",
+    "WebSocket", "HTTP", "gRPC", "线程",
+}
+
+DEV_KEYWORDS = STRONG_DEV_KEYWORDS | WEAK_DEV_KEYWORDS
 
 # ── 知识库内存索引 ────────────────────────────────────────────────────────
 
@@ -239,16 +248,25 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     return results
 
 def classify_intent(query: str) -> set:
-    """根据问题关键词判断应该搜索哪些知识库，返回 {'inexbot', 'inexbot-open'}"""
+    """根据问题关键词判断应该搜索哪些知识库"""
+    has_strong_dev = any(kw in query for kw in STRONG_DEV_KEYWORDS)
+    has_weak_dev = any(kw in query for kw in WEAK_DEV_KEYWORDS)
     has_system = any(kw in query for kw in SYSTEM_KEYWORDS)
-    has_dev = any(kw in query for kw in DEV_KEYWORDS)
 
-    if has_system and not has_dev:
-        return {"inexbot"}
-    elif has_dev and not has_system:
+    # 强开发关键词 → 只走 open
+    if has_strong_dev:
         return {"inexbot-open"}
-    else:
-        return {"inexbot", "inexbot-open"}  # 都有或都没有 → 全搜
+
+    # 系统关键词 → 只走 doc
+    if has_system:
+        return {"inexbot"}
+
+    # 弱开发关键词但无系统词 → open
+    if has_weak_dev:
+        return {"inexbot-open"}
+
+    # 都没命中 → 全搜
+    return {"inexbot", "inexbot-open"}
 
 
 def search_all_kb(query: str) -> dict:
