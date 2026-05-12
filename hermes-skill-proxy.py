@@ -25,6 +25,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from urllib.parse import quote as url_quote
+
 from flask import Flask, request, Response
 import requests
 import jieba
@@ -149,7 +151,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         results.append({
             "title": item.get("title", ""),
             "path": path,
-            "url": base_url + path,
+            "url": base_url + url_quote(path, safe="/"),
             "description": item.get("description", ""),
             "content_snippet": item.get("content_snippet", "")[:800],
             "kb_name": kb_name,
