@@ -203,7 +203,7 @@ def format_results(all_results: dict) -> str:
     lines.append("1. 优先使用上面检索到的知识库内容回答，不要凭记忆猜测或编造")
     lines.append("2. 如果内容足够，给出完整、详细的技术回答；如果部分覆盖，明确说明哪些来自文档、哪些需要进一步确认")
     lines.append("3. 每个引用的知识点必须标注来源编号（如「文档1」），让用户知道信息来自哪里")
-    lines.append("4. 答案末尾必须列出所有使用过的文档链接，一条都不能漏，格式为：📄 原文：标题 | 链接")
+    lines.append("4. 答案末尾必须列出所有使用过的文档链接（用 Markdown 超链接格式：[标题](链接)），一条都不能漏")
     lines.append("5. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
 
     return "\n".join(lines)
