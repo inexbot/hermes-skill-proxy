@@ -255,14 +255,17 @@ def classify_intent(query: str) -> set:
 
 
 def search_all_kb(query: str) -> dict:
-    """搜索知识库（根据问题意图定向搜索）"""
+    """搜索知识库（根据问题意图定向搜索，单库时多取结果）"""
     allowed = classify_intent(query)
+    single_kb = len(allowed) == 1
+    k = 6 if single_kb else 3
+
     all_results = {}
     for cfg in KB_CONFIGS:
         name = cfg["name"]
         if name not in allowed:
             continue
-        results = search_single_kb(name, query, TOP_K)
+        results = search_single_kb(name, query, k)
         if results:
             all_results[cfg["label"]] = results
     return all_results
@@ -296,7 +299,7 @@ def format_results(all_results: dict) -> str:
     lines.append("---")
     lines.append("")
     lines.append("【回答要求】")
-    lines.append("1. 基于上面检索到的文档内容回答，不要凭记忆猜测或编造")
+    lines.append("1. 综合上面所有文档的内容回答，不要只选某几篇")
     lines.append("2. 给出完整详细的技术回答；如果文档没有覆盖到用户问题的某方面，诚实说明")
     lines.append("3. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
     lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
