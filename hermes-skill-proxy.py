@@ -158,18 +158,18 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
     except Exception:
         return ""
 
-    if not query or len(content) < 3000:
-        return content[:3000]
+    if not query or len(content) < 6000:
+        return content[:6000]
 
     # 按 ## 或 ### 标题分段
     import re
     sections = re.split(r'\n(?=#{2,3}\s)', content)
     if len(sections) <= 2:
-        return content[:3000]
+        return content[:6000]
 
     query_words = {w for w in jieba.cut(query) if len(w) >= 2}
     if not query_words:
-        return content[:3000]
+        return content[:6000]
 
     # 给每个段打分，取 top 段
     scored = []
@@ -179,16 +179,16 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
             scored.append((score, sec))
 
     if not scored:
-        return content[:3000]
+        return content[:6000]
 
     scored.sort(key=lambda x: -x[0])
-    # 取 top 段，最多 4000 字
+    # 取 top 段，最多 8000 字
     result = []
     total_len = 0
     for _, sec in scored:
         result.append(sec.strip())
         total_len += len(sec)
-        if total_len > 4000:
+        if total_len > 8000:
             break
 
     return "\n\n".join(result)
@@ -235,7 +235,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
             "path": path,
             "url": base_url + path.replace(" ", "%20"),
             "description": item.get("description", ""),
-            "content_snippet": snippet[:2000],
+            "content_snippet": snippet[:3000],
             "kb_name": kb_name,
             "score": score,
         })
