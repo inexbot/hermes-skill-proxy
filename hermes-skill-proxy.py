@@ -44,12 +44,14 @@ KB_CONFIGS = [
         "label": "纳博特产品文档",
         "base_url": "https://doc.inexbot.com",
         "index_file": Path.home() / ".hermes" / "kb" / "inexbot" / "index.json",
+        "md_dir": Path.home() / ".hermes" / "kb" / "inexbot" / "md",
     },
     {
         "name": "inexbot-open",
         "label": "纳博特开放平台",
         "base_url": "https://open.inexbot.com",
         "index_file": Path.home() / ".hermes" / "kb" / "inexbot-open" / "index.json",
+        "md_dir": Path.home() / ".hermes" / "kb" / "inexbot-open" / "md",
     },
 ]
 
@@ -65,6 +67,8 @@ _doc_scores: dict = {}
 _index_data: dict = {}
 # 每个 KB 的 base_url
 _kb_urls: dict = {}
+# 每个 KB 的 md_dir（用于读取完整文档）
+_kb_md_dirs: dict = {}
 
 def load_single_index(cfg: dict):
     """加载单个知识库索引"""
@@ -80,6 +84,7 @@ def load_single_index(cfg: dict):
 
     _index_data[name] = raw
     _kb_urls[name] = cfg["base_url"]
+    _kb_md_dirs[name] = cfg.get("md_dir")
 
     scores = {}
     for path, item in raw.items():
@@ -117,6 +122,28 @@ threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
+def read_full_content(kb_name: str, path: str) -> str:
+    """读取文档完整 Markdown 内容（用于给 LLM 提供更多上下文）"""
+    md_dir = _kb_md_dirs.get(kb_name)
+    if not md_dir:
+        return ""
+    # 路径中的 / 替换为 - 后缀 .md
+    slug = path.lstrip("/").replace("/", "-")
+    md_path = md_dir / f"{slug}.md"
+    if not md_path.exists():
+        # 尝试 URL 编码后的文件名
+        from urllib.parse import quote
+        slug2 = quote(path.lstrip("/"), safe="").replace("/", "-")
+        md_path = md_dir / f"{slug2}.md"
+    if md_path.exists():
+        try:
+            with open(md_path, encoding="utf-8") as f:
+                return f.read()[:2000]  # 最多取前2000字
+        except Exception:
+            pass
+    return ""
+
+
 def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     """在单个知识库中检索"""
     if kb_name not in _doc_scores or kb_name not in _index_data:
@@ -146,12 +173,19 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     results = []
     for path, score in ranked:
         item = idx[path]
+        # 优先读完整 MD 内容（比 300 字 snippet 详细得多）
+        snippet = item.get("content_snippet", "")
+        if len(snippet) < 500:
+            full = read_full_content(kb_name, path)
+            if full:
+                snippet = full
+
         results.append({
             "title": item.get("title", ""),
             "path": path,
             "url": base_url + url_quote(path, safe="/"),
             "description": item.get("description", ""),
-            "content_snippet": item.get("content_snippet", "")[:800],
+            "content_snippet": snippet[:2000],
             "kb_name": kb_name,
             "score": score,
         })
