@@ -57,6 +57,24 @@ LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
 TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空间）
 
+# 问题类型关键词（用于定向搜索知识库）
+SYSTEM_KEYWORDS = {
+    "标定", "焊接", "配置", "操作", "参数", "控制器", "示教器", "通讯",
+    "总线", "故障", "报错", "版本", "规格", "选型", "码垛", "喷涂",
+    "冲压", "打磨", "切割", "搬运", "传送带", "视觉", "传感器",
+    "坐标系", "运动", "指令", "变量", "工艺", "伺服", "安全",
+    "安装", "接线", "维护", "保养", "零点", "电机", "编码器",
+    "IO", "Modbus", "EtherCAT", "Ethernet", "CAN", "Profinet",
+}
+
+DEV_KEYWORDS = {
+    "API", "二次开发", "JSON", "ROS", "SDK", "HAL", "接口",
+    "自定义", "示例", "Demo", "教程", "上位机", "主站库",
+    "协议解析", "端口协议", "功能码", "开发", "编程",
+    "C++", "Python", "C#", "源码", "GitHub", "回调",
+    "线程", "socket", "WebSocket", "HTTP", "gRPC", "插件",
+}
+
 # ── 知识库内存索引 ────────────────────────────────────────────────────────
 
 # 数据结构: { "kb_name": { path: {"title_tokens": set, "desc_tokens": set, "word_counts": dict} } }
@@ -223,11 +241,27 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         })
     return results
 
+def classify_intent(query: str) -> set:
+    """根据问题关键词判断应该搜索哪些知识库，返回 {'inexbot', 'inexbot-open'}"""
+    has_system = any(kw in query for kw in SYSTEM_KEYWORDS)
+    has_dev = any(kw in query for kw in DEV_KEYWORDS)
+
+    if has_system and not has_dev:
+        return {"inexbot"}
+    elif has_dev and not has_system:
+        return {"inexbot-open"}
+    else:
+        return {"inexbot", "inexbot-open"}  # 都有或都没有 → 全搜
+
+
 def search_all_kb(query: str) -> dict:
-    """搜索所有知识库，返回按知识库分组的结果"""
+    """搜索知识库（根据问题意图定向搜索）"""
+    allowed = classify_intent(query)
     all_results = {}
     for cfg in KB_CONFIGS:
         name = cfg["name"]
+        if name not in allowed:
+            continue
         results = search_single_kb(name, query, TOP_K)
         if results:
             all_results[cfg["label"]] = results
@@ -262,7 +296,7 @@ def format_results(all_results: dict) -> str:
     lines.append("---")
     lines.append("")
     lines.append("【回答要求】")
-    lines.append("1. 综合上面所有文档的内容回答，不要只选某几篇，每篇都可能有用户需要的答案")
+    lines.append("1. 基于上面检索到的文档内容回答，不要凭记忆猜测或编造")
     lines.append("2. 给出完整详细的技术回答；如果文档没有覆盖到用户问题的某方面，诚实说明")
     lines.append("3. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
     lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
