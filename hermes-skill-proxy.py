@@ -158,37 +158,34 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
     except Exception:
         return ""
 
-    if not query or len(content) < 6000:
-        return content[:6000]
+    if not query or len(content) < 12000:
+        return content[:12000]
 
     # 按 ## 或 ### 标题分段
     import re
     sections = re.split(r'\n(?=#{2,3}\s)', content)
     if len(sections) <= 2:
-        return content[:6000]
+        return content[:12000]
 
     query_words = {w for w in jieba.cut(query) if len(w) >= 2}
     if not query_words:
-        return content[:6000]
+        return content[:12000]
 
     # 给每个段打分，取 top 段
     scored = []
     for sec in sections:
         score = sum(1 for w in query_words if w in sec)
-        if score > 0:
-            scored.append((score, sec))
+        scored.append((score, sec))
 
-    if not scored:
-        return content[:6000]
-
+    # 按相关性排序，高分的在前面
     scored.sort(key=lambda x: -x[0])
-    # 取 top 段，最多 8000 字
+    # 取所有有分的段 + 少量低分段，最多 15000 字
     result = []
     total_len = 0
     for _, sec in scored:
         result.append(sec.strip())
         total_len += len(sec)
-        if total_len > 8000:
+        if total_len > 15000:
             break
 
     return "\n\n".join(result)
@@ -235,7 +232,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
             "path": path,
             "url": base_url + path.replace(" ", "%20"),
             "description": item.get("description", ""),
-            "content_snippet": snippet[:3000],
+            "content_snippet": snippet[:6000],
             "kb_name": kb_name,
             "score": score,
         })
@@ -299,10 +296,10 @@ def format_results(all_results: dict) -> str:
     lines.append("---")
     lines.append("")
     lines.append("【回答要求】")
-    lines.append("1. 综合上面所有文档的内容回答，不要只选某几篇")
-    lines.append("2. 给出完整详细的技术回答；如果文档没有覆盖到用户问题的某方面，诚实说明")
+    lines.append("1. 综合上面所有文档的内容详尽回答，列出具体步骤、参数说明和示例，不要省略细节")
+    lines.append("2. 如果文档覆盖了用户问题的多个方面，每个方面都要详细说明")
     lines.append("3. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
-    lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
+    lines.append("4. 使用专业的技术语言，用 Markdown 表格/代码块/列表组织详细内容")
     lines.append("")
     lines.append("【引用清单】（直接复制到答案末尾）")
     for item in all_results.values():
