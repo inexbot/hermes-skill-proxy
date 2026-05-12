@@ -250,8 +250,6 @@ def format_results(all_results: dict) -> str:
 
     doc_num = 0
     for kb_label, results in all_results.items():
-        lines.append(f"## {kb_label}")
-        lines.append("")
         for item in results:
             doc_num += 1
             lines.append(f"--- 文档 {doc_num} ---")
@@ -260,15 +258,15 @@ def format_results(all_results: dict) -> str:
             if item["description"]:
                 lines.append(f"简介：{item['description']}")
             if item["content_snippet"]:
-                lines.append(f"正文摘要：{item['content_snippet']}")
+                lines.append(f"正文：{item['content_snippet']}")
             lines.append("")
 
     lines.append("---")
     lines.append("")
     lines.append("【回答要求】")
-    lines.append("1. 直接基于上面检索到的知识库内容回答，不要凭记忆猜测")
-    lines.append("2. 如果检索内容足以回答问题，给出完整详细的技术回答；覆盖不足时基于已有内容给出部分答案")
-    lines.append("3. 答案末尾必须列出所有引用过的文档链接，用 Markdown 超链接格式：[标题](链接)，一条都不能漏")
+    lines.append("1. 综合上面所有文档的内容回答，不要只选某几篇，每篇都可能有用户需要的答案")
+    lines.append("2. 给出完整详细的技术回答；如果文档没有覆盖到用户问题的某方面，诚实说明")
+    lines.append("3. 答案末尾必须列出所有引用过的文档链接，用 Markdown 超链接格式：[标题](链接)")
     lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
 
     return "\n".join(lines)
