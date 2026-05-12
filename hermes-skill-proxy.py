@@ -316,8 +316,9 @@ def format_results(all_results: dict) -> str:
     lines.append("【回答要求】")
     lines.append("1. 综合上面所有文档的内容详尽回答，列出具体步骤、参数说明和示例，不要省略细节")
     lines.append("2. 如果文档覆盖了用户问题的多个方面，每个方面都要详细说明")
-    lines.append("3. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
-    lines.append("4. 使用专业的技术语言，用 Markdown 表格/代码块/列表组织详细内容")
+    lines.append("3. 文档正文中的配图如果与回答相关，直接复制 ![说明](链接) 放在对应文字后")
+    lines.append("4. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
+    lines.append("5. 使用专业的技术语言，用 Markdown 表格/代码块/列表组织详细内容")
     lines.append("")
     lines.append("【引用清单】（直接复制到答案末尾）")
     for item in all_results.values():
