@@ -391,6 +391,9 @@ def proxy_request():
         new_messages.insert(0, {"role": "system", "content": system_prompt})
 
     new_body = {**body, "messages": new_messages}
+    # 确保 MiniMax 输出足够长（默认太短会截断详细回答）
+    if "max_tokens" not in new_body:
+        new_body["max_tokens"] = 16384
 
     # 转发到 Hermes
     headers = {"Content-Type": "application/json"}
