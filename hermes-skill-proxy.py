@@ -264,8 +264,14 @@ def format_results(all_results: dict) -> str:
     lines.append("【回答要求】")
     lines.append("1. 综合上面所有文档的内容回答，不要只选某几篇，每篇都可能有用户需要的答案")
     lines.append("2. 给出完整详细的技术回答；如果文档没有覆盖到用户问题的某方面，诚实说明")
-    lines.append("3. 答案末尾必须列出所有引用过的文档链接，用 Markdown 超链接格式：[标题](链接)")
+    lines.append("3. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
     lines.append("4. 使用简洁专业的技术语言，适当使用 Markdown 表格/列表来组织回答")
+    lines.append("")
+    lines.append("【引用清单】（直接复制到答案末尾）")
+    for item in all_results.values():
+        for doc in item:
+            lines.append(f"- [{doc['title']}]({doc['url']})")
+    lines.append("")
 
     return "\n".join(lines)
 
