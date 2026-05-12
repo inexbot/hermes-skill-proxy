@@ -57,7 +57,7 @@ KB_CONFIGS = [
 
 LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
-TOP_K = 3  # 每个知识库取 top-k 条结果
+TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空间）
 
 # ── 知识库内存索引 ────────────────────────────────────────────────────────
 
@@ -122,26 +122,60 @@ threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
-def read_full_content(kb_name: str, path: str) -> str:
-    """读取文档完整 Markdown 内容（用于给 LLM 提供更多上下文）"""
+def read_full_content(kb_name: str, path: str, query: str = "") -> str:
+    """读取文档内容，提取与 query 最相关的段落（不是只取开头）"""
     md_dir = _kb_md_dirs.get(kb_name)
     if not md_dir:
         return ""
-    # 路径中的 / 替换为 - 后缀 .md
     slug = path.lstrip("/").replace("/", "-")
     md_path = md_dir / f"{slug}.md"
     if not md_path.exists():
-        # 尝试 URL 编码后的文件名
         from urllib.parse import quote
         slug2 = quote(path.lstrip("/"), safe="").replace("/", "-")
         md_path = md_dir / f"{slug2}.md"
-    if md_path.exists():
-        try:
-            with open(md_path, encoding="utf-8") as f:
-                return f.read()[:2000]  # 最多取前2000字
-        except Exception:
-            pass
-    return ""
+    if not md_path.exists():
+        return ""
+
+    try:
+        with open(md_path, encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return ""
+
+    if not query or len(content) < 3000:
+        return content[:3000]
+
+    # 按 ## 或 ### 标题分段
+    import re
+    sections = re.split(r'\n(?=#{2,3}\s)', content)
+    if len(sections) <= 2:
+        return content[:3000]
+
+    query_words = {w for w in jieba.cut(query) if len(w) >= 2}
+    if not query_words:
+        return content[:3000]
+
+    # 给每个段打分，取 top 段
+    scored = []
+    for sec in sections:
+        score = sum(1 for w in query_words if w in sec)
+        if score > 0:
+            scored.append((score, sec))
+
+    if not scored:
+        return content[:3000]
+
+    scored.sort(key=lambda x: -x[0])
+    # 取 top 段，最多 4000 字
+    result = []
+    total_len = 0
+    for _, sec in scored:
+        result.append(sec.strip())
+        total_len += len(sec)
+        if total_len > 4000:
+            break
+
+    return "\n\n".join(result)
 
 
 def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
@@ -173,10 +207,10 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     results = []
     for path, score in ranked:
         item = idx[path]
-        # 优先读完整 MD 内容（比 300 字 snippet 详细得多）
+        # 读完整 MD，提取与问题最相关的段落
         snippet = item.get("content_snippet", "")
         if len(snippet) < 500:
-            full = read_full_content(kb_name, path)
+            full = read_full_content(kb_name, path, query)
             if full:
                 snippet = full
 
