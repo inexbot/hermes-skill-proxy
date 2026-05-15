@@ -57,15 +57,21 @@ LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
 TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空间）
 
-# 问题类型关键词（用于定向搜索知识库）
-SYSTEM_KEYWORDS = {
-    "标定", "焊接", "控制器", "示教器", "通讯",
-    "总线", "故障", "报错", "版本", "规格", "选型", "码垛", "喷涂",
-    "冲压", "打磨", "切割", "搬运", "传送带", "视觉", "传感器",
-    "坐标系", "运动", "变量", "工艺", "伺服", "安全",
-    "安装", "接线", "维护", "保养", "零点", "电机", "编码器",
-    "Modbus", "EtherCAT", "Ethernet", "CAN", "Profinet",
-    "IO", "急停", "使能", "手轮", "面板", "复位",
+# 系统关键词 —— 从索引文档标题自动派生（每次重载时更新）
+SYSTEM_KEYWORDS: set = set()
+
+# 虚词黑名单（jieba 分词结果中需要过滤掉的常见非技术词）
+_STOP_WORDS = {
+    "一个", "一些", "一种", "一起", "一般", "不同", "不用", "不能",
+    "不要", "之后", "之前", "之间", "什么", "介绍", "使用", "例如",
+    "关于", "其他", "其中", "内容", "几个", "出来", "到了", "功能",
+    "包括", "只要", "可以", "可能", "各种", "同时", "如何", "如果",
+    "对于", "就是", "已经", "并且", "开始", "必须", "怎么", "所有",
+    "所以", "整个", "文件", "文章", "方法", "时候", "更多", "查看",
+    "没有", "注意", "然后", "版本", "现在", "由于", "相关", "说明",
+    "这些", "这里", "这样", "通过", "部分", "需要", "这个", "进行",
+    "还是", "还有", "那些", "那么", "都是", "问题", "页面", "首页",
+    "其他", "以及", "关于", "为了", "能够", "根据",
 }
 
 # 强开发关键词（命中任一即强制走 open）
@@ -134,6 +140,34 @@ def load_all_indexes():
         load_single_index(cfg)
     total = sum(len(v) for v in _index_data.values())
     print(f"[proxy] Total: {total} docs across {len(_index_data)} indexes")
+    _rebuild_system_keywords()
+
+def _rebuild_system_keywords():
+    """从文档库标题自动派生系统关键词（零配置，新增文档自动生效）"""
+    global SYSTEM_KEYWORDS
+    from collections import Counter
+    counter = Counter()
+    for name, idx in _index_data.items():
+        if not name.startswith("inexbot") or name == "inexbot-open":
+            continue  # 只从 doc.inexbot.com 派生，不包含 open 平台（偏开发）
+        for path, item in idx.items():
+            title = item.get("title", "")
+            words = jieba.cut(title)
+            for w in words:
+                w = w.strip()
+                if len(w) >= 2 and w not in _STOP_WORDS and not w.isascii() == (len(w) <= 3):
+                    counter[w] += 1
+    # 保留出现 ≥2 次的词（过滤偶然词和噪声），加上英文缩写（始终保留）
+    system_kw = {w for w, c in counter.items() if c >= 2}
+    # 补回英文技术缩写（jieba 分词对英文切得碎，但标题中常见）
+    for name, idx in _index_data.items():
+        for path, item in idx.items():
+            title = item.get("title", "")
+            import re
+            for m in re.finditer(r'\b[A-Z][A-Za-z0-9]{1,15}\b', title):
+                system_kw.add(m.group())
+    SYSTEM_KEYWORDS = system_kw
+    print(f"[proxy] Auto-derived {len(SYSTEM_KEYWORDS)} system keywords from doc titles")
 
 load_all_indexes()
 
