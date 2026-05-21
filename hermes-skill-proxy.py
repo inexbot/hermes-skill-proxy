@@ -54,6 +54,7 @@ KB_CONFIGS = [
 ]
 
 LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
+FEEDBACK_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "feedback.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
 TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空间）
 
@@ -491,6 +492,40 @@ def health():
         "indexes": index_info,
         "hermes_url": HERMES_URL,
     }), status=200)
+
+
+@app.route("/api/feedback", methods=["POST"])
+def feedback():
+    """记录用户对 AI 回答的反馈（点赞/差评）"""
+    if not request.is_json:
+        return Response(json.dumps({"error": "JSON required"}), status=400)
+
+    data = request.get_json()
+    question = (data.get("question") or "").strip()[:500]
+    answer = (data.get("answer") or "").strip()[:2000]
+    rating = data.get("rating", "")
+
+    if not question:
+        return Response(json.dumps({"error": "question is required"}), status=400)
+    if rating not in ("up", "down"):
+        return Response(json.dumps({"error": "rating must be 'up' or 'down'"}), status=400)
+
+    try:
+        os.makedirs(os.path.dirname(FEEDBACK_FILE), exist_ok=True)
+        entry = {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "question": question,
+            "answer": answer,
+            "rating": rating,
+        }
+        with open(FEEDBACK_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        print(f"[proxy] Feedback recorded: {rating} — {question[:80]}")
+    except Exception as e:
+        print(f"[proxy] feedback error: {e}")
+        return Response(json.dumps({"error": "failed to save feedback"}), status=500)
+
+    return Response(json.dumps({"status": "ok"}), status=200)
 
 
 if __name__ == "__main__":
