@@ -216,9 +216,14 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
         return content[:12000]
 
     # 给每个段打分，取 top 段
+    # 精确短语匹配加分（完整查询字符串出现在段落中，权重是普通词匹配的 5 倍）
+    query_lower = query.strip().lower()
     scored = []
     for sec in sections:
         score = sum(1 for w in query_words if w in sec)
+        # 精确短语加分：段落包含完整查询字符串
+        if query_lower and query_lower in sec.lower():
+            score += 10
         scored.append((score, sec))
 
     # 按相关性排序，高分的在前面
@@ -266,19 +271,18 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     results = []
     for path, score in ranked:
         item = idx[path]
-        # 读完整 MD，提取与问题最相关的段落
+        # 始终读完整 MD，提取与问题最相关的段落（不再只看开头）
         snippet = item.get("content_snippet", "")
-        if len(snippet) < 500:
-            full = read_full_content(kb_name, path, query)
-            if full:
-                snippet = full
+        full = read_full_content(kb_name, path, query)
+        if full:
+            snippet = full  # 用段落提取结果覆盖静态 snippet
 
         results.append({
             "title": item.get("title", ""),
             "path": path,
             "url": base_url + url_quote(path, safe="/"),
             "description": item.get("description", ""),
-            "content_snippet": snippet[:6000],
+            "content_snippet": snippet[:8000],
             "kb_name": kb_name,
             "score": score,
         })
