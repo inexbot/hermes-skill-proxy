@@ -24,6 +24,7 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote as url_quote
 
 from flask import Flask, request, Response
 import requests
@@ -56,7 +57,7 @@ KB_CONFIGS = [
 LOG_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "questions.log"
 FEEDBACK_FILE = Path.home() / ".hermes" / "kb" / "inexbot" / "feedback.log"
 RELOAD_INTERVAL = 5 * 3600  # 5 小时
-TOP_K = 2  # 每个知识库取 top-k 条结果（少而精，给每篇更多空间）
+TOP_K = 5  # 每个知识库取 top-k 条结果
 
 # 系统关键词 —— 从索引文档标题自动派生（每次重载时更新）
 SYSTEM_KEYWORDS: set = set()
@@ -190,8 +191,7 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
     slug = path.lstrip("/").replace("/", "-")
     md_path = md_dir / f"{slug}.md"
     if not md_path.exists():
-        from urllib.parse import quote
-        slug2 = quote(path.lstrip("/"), safe="").replace("/", "-")
+        slug2 = url_quote(path.lstrip("/"), safe="").replace("/", "-")
         md_path = md_dir / f"{slug2}.md"
     if not md_path.exists():
         return ""
@@ -252,11 +252,13 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         score = 0.0
         for w in query_words:
             if w in item_ds["title_tokens"]:
-                score += 4
+                score += 5            # 标题命中（略降，不再绝对统治）
             if w in item_ds["desc_tokens"]:
-                score += 2
+                score += 3            # 描述命中
+            if w in item_ds["content_tokens"]:
+                score += 2            # 正文命中（关键修复：之前完全没用！）
             if w in item_ds["word_counts"]:
-                score += 0.5 * item_ds["word_counts"][w]
+                score += 1.0 * min(item_ds["word_counts"][w], 10)  # 词频加分（上限防单次刷分）
         if score > 0:
             scores[path] = score
 
@@ -274,7 +276,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         results.append({
             "title": item.get("title", ""),
             "path": path,
-            "url": base_url + path.replace(" ", "%20"),
+            "url": base_url + url_quote(path, safe="/"),
             "description": item.get("description", ""),
             "content_snippet": snippet[:6000],
             "kb_name": kb_name,
@@ -308,7 +310,7 @@ def search_all_kb(query: str) -> dict:
     """搜索知识库（根据问题意图定向搜索，单库时多取结果）"""
     allowed = classify_intent(query)
     single_kb = len(allowed) == 1
-    k = 6 if single_kb else 3
+    k = 10 if single_kb else 6  # 双库各取6篇，单库取10篇
 
     all_results = {}
     for cfg in KB_CONFIGS:
@@ -415,12 +417,15 @@ def proxy_request():
     else:
         system_prompt = (
             "你是一个专业的纳博特科技（iNexBot）工业机器人AI助手。\n"
+            "【当前状态】知识库未搜索到直接匹配的文档，但请基于你对纳博特/NexDroid控制系统、"
+            "工业机器人技术的训练知识，尽力回答用户问题。\n\n"
             "回答要求：\n"
-            "1. 如果你了解纳博特相关产品和技术，直接回答\n"
-            "2. 如果不确定，建议用户查阅 https://doc.inexbot.com 或 https://open.inexbot.com\n"
-            "3. 使用简洁专业的技术语言，适当使用 Markdown 格式来组织回答\n"
-            "4. 不要出现 ~/workspace 或任何本地路径\n"
-            "5. 链接必须以 https://doc.inexbot.com/ 或 https://open.inexbot.com/ 或 https://www.inexbot.com 开头"
+            "1. 优先基于你对纳博特产品的了解直接回答，列出具体步骤和参数\n"
+            "2. 如果确实不了解某个具体细节，明确说明「该部分建议查阅官方文档确认」，不要编造\n"
+            "3. 使用简洁专业的技术语言，适当使用 Markdown 来组织回答\n"
+            "4. 仅使用以下合法链接：https://doc.inexbot.com/ 或 https://open.inexbot.com/ 或 https://www.inexbot.com\n"
+            "5. 不要出现 ~/workspace 或任何本地路径\n"
+            "6. 不要直接说「我不知道」，尝试给用户有参考价值的回答"
         )
 
     # 认证
