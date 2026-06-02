@@ -20,6 +20,7 @@ Hermes API Proxy — 双知识库检索 + 注入 system prompt
 
 import os
 import json
+import re
 import time
 import threading
 from datetime import datetime
@@ -157,7 +158,12 @@ def _rebuild_system_keywords():
             words = jieba.cut(title)
             for w in words:
                 w = w.strip()
-                if len(w) >= 2 and w not in _STOP_WORDS and not w.isascii() == (len(w) <= 3):
+                # 保留中文词（>=2字）和英文技术缩写
+                if len(w) < 2 or w in _STOP_WORDS:
+                    continue
+                is_chinese = not w.isascii()
+                is_short_en = w.isascii() and len(w) <= 3
+                if is_chinese or is_short_en:
                     counter[w] += 1
     # 保留出现 ≥2 次的词（过滤偶然词和噪声），加上英文缩写（始终保留）
     system_kw = {w for w, c in counter.items() if c >= 2}
@@ -165,21 +171,18 @@ def _rebuild_system_keywords():
     for name, idx in _index_data.items():
         for path, item in idx.items():
             title = item.get("title", "")
-            import re
             for m in re.finditer(r'\b[A-Z][A-Za-z0-9]{1,15}\b', title):
                 system_kw.add(m.group())
     SYSTEM_KEYWORDS = system_kw
     print(f"[proxy] Auto-derived {len(SYSTEM_KEYWORDS)} system keywords from doc titles")
 
-load_all_indexes()
-
 # ── 定时重载 ──────────────────────────────────────────────────────────────
 
 def schedule_reload():
     load_all_indexes()
-    threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
-
-threading.Timer(RELOAD_INTERVAL, schedule_reload).start()
+    t = threading.Timer(RELOAD_INTERVAL, schedule_reload)
+    t.daemon = True
+    t.start()
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
@@ -240,6 +243,27 @@ def read_full_content(kb_name: str, path: str, query: str = "") -> str:
     return "\n\n".join(result)
 
 
+def _expand_query_words(query: str) -> set:
+    """扩展查询词：jieba 分词 + 组合词 + 原始短语"""
+    words = set()
+    # 1. jieba 基础分词
+    for w in jieba.cut(query):
+        w = w.strip()
+        if len(w) >= 2:
+            words.add(w)
+    # 2. 添加完整查询作为短语匹配（处理"工具手标定"这类专有名词）
+    query_clean = query.strip()
+    if len(query_clean) >= 2:
+        words.add(query_clean)
+    # 3. 滑窗切分（2-4字组合词），提高召回
+    for n in range(2, min(len(query_clean) + 1, 5)):
+        for i in range(len(query_clean) - n + 1):
+            chunk = query_clean[i:i+n]
+            if not chunk.isspace():
+                words.add(chunk)
+    return words
+
+
 def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     """在单个知识库中检索"""
     if kb_name not in _doc_scores or kb_name not in _index_data:
@@ -249,40 +273,56 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
     idx = _index_data[kb_name]
     base_url = _kb_urls.get(kb_name, "")
 
-    query_words = set(jieba.cut(query))
-    query_words = {w for w in query_words if len(w) >= 2}
+    query_words = _expand_query_words(query)
+    query_lower = query.strip().lower()
 
     scores = {}
     for path, item_ds in ds.items():
         score = 0.0
+        title = idx[path].get("title", "").lower()
+        desc = idx[path].get("description", "").lower()
+
+        # 精确短语匹配（最高权重）
+        if query_lower and query_lower in title:
+            score += 20
+        elif query_lower and query_lower in desc:
+            score += 10
+
         for w in query_words:
             if w in item_ds["title_tokens"]:
-                score += 5            # 标题命中（略降，不再绝对统治）
+                score += 3
             if w in item_ds["desc_tokens"]:
-                score += 3            # 描述命中
+                score += 2
             if w in item_ds["content_tokens"]:
-                score += 2            # 正文命中（关键修复：之前完全没用！）
+                score += 1
             if w in item_ds["word_counts"]:
-                score += 1.0 * min(item_ds["word_counts"][w], 10)  # 词频加分（上限防单次刷分）
+                score += 0.5 * min(item_ds["word_counts"][w], 5)
+
         if score > 0:
             scores[path] = score
+
+    # 相关性阈值：过滤掉明显低分的文档
+    if not scores:
+        return []
+    max_score = max(scores.values())
+    threshold = max_score * 0.3  # 低于最高分 30% 的过滤掉
+    scores = {p: s for p, s in scores.items() if s >= threshold}
 
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
     results = []
     for path, score in ranked:
         item = idx[path]
-        # 始终读完整 MD，提取与问题最相关的段落（不再只看开头）
         snippet = item.get("content_snippet", "")
         full = read_full_content(kb_name, path, query)
         if full:
-            snippet = full  # 用段落提取结果覆盖静态 snippet
+            snippet = full
 
         results.append({
             "title": item.get("title", ""),
             "path": path,
             "url": base_url + url_quote(path, safe="/"),
             "description": item.get("description", ""),
-            "content_snippet": snippet[:8000],
+            "content_snippet": snippet[:4000],  # 从8000降到4000，减少噪声
             "kb_name": kb_name,
             "score": score,
         })
@@ -311,10 +351,10 @@ def classify_intent(query: str) -> set:
 
 
 def search_all_kb(query: str) -> dict:
-    """搜索知识库（根据问题意图定向搜索，单库时多取结果）"""
+    """搜索知识库（根据问题意图定向搜索）"""
     allowed = classify_intent(query)
     single_kb = len(allowed) == 1
-    k = 10 if single_kb else 6  # 双库各取6篇，单库取10篇
+    k = 5 if single_kb else 3  # 单库取5篇，双库各取3篇（减少噪声）
 
     all_results = {}
     for cfg in KB_CONFIGS:
@@ -324,6 +364,15 @@ def search_all_kb(query: str) -> dict:
         results = search_single_kb(name, query, k)
         if results:
             all_results[cfg["label"]] = results
+
+    # 调试日志：打印检索结果
+    total = sum(len(v) for v in all_results.values())
+    print(f"[proxy] Query: {query[:80]}")
+    print(f"[proxy] Intent: {allowed}, Results: {total}")
+    for label, items in all_results.items():
+        for item in items:
+            print(f"[proxy]   [{item['score']:.1f}] {item['title'][:60]}")
+
     return all_results
 
 def format_results(all_results: dict) -> str:
@@ -335,7 +384,7 @@ def format_results(all_results: dict) -> str:
     lines = [
         "",
         "【知识库检索结果】",
-        f"以下是从纳博特文档库中检索到的 {total} 篇相关内容，请直接基于这些内容回答用户问题：",
+        f"以下是从纳博特文档库中检索到的 {total} 篇相关内容：",
         "",
     ]
 
@@ -343,7 +392,7 @@ def format_results(all_results: dict) -> str:
     for kb_label, results in all_results.items():
         for item in results:
             doc_num += 1
-            lines.append(f"--- 文档 {doc_num} ---")
+            lines.append(f"--- 文档 {doc_num}（相关度：{item['score']:.1f}）---")
             lines.append(f"标题：{item['title']}")
             lines.append(f"链接：{item['url']}")
             if item["description"]:
@@ -355,13 +404,14 @@ def format_results(all_results: dict) -> str:
     lines.append("---")
     lines.append("")
     lines.append("【回答要求】")
-    lines.append("1. 综合上面所有文档的内容详尽回答，列出具体步骤、参数说明和示例，不要省略细节")
-    lines.append("2. 如果文档覆盖了用户问题的多个方面，每个方面都要详细说明")
-    lines.append("3. 文档正文中的配图如果与回答相关，直接复制 ![说明](链接) 放在对应文字后")
-    lines.append("4. 答案末尾直接复制粘贴下面的「引用清单」，不要自己编造链接")
-    lines.append("5. 使用专业的技术语言，用 Markdown 表格/代码块/列表组织详细内容")
+    lines.append("1. 先判断上面的文档是否与用户问题相关，只使用相关文档回答")
+    lines.append("2. 如果文档与问题不相关或信息不足，明确告知「知识库中未找到相关信息」，不要编造")
+    lines.append("3. 如果有相关文档，详尽回答，列出具体步骤、参数说明和示例")
+    lines.append("4. 文档正文中的配图如果与回答相关，直接复制 ![说明](链接) 放在对应文字后")
+    lines.append("5. 答案末尾直接复制粘贴下面的「引用清单」，只列出实际使用的文档")
+    lines.append("6. 使用专业的技术语言，用 Markdown 表格/代码块/列表组织详细内容")
     lines.append("")
-    lines.append("【引用清单】（直接复制到答案末尾）")
+    lines.append("【引用清单】（只复制实际使用的文档）")
     for item in all_results.values():
         for doc in item:
             lines.append(f"- [{doc['title']}]({doc['url']})")
@@ -538,6 +588,12 @@ def feedback():
 
 
 if __name__ == "__main__":
+    # 启动时加载知识库索引
+    load_all_indexes()
+
+    # 启动定时重载
+    schedule_reload()
+
     print(f"[proxy] Starting Hermes Skill Proxy on port {PROXY_PORT}")
     print(f"[proxy] Forwarding to {HERMES_URL}")
     print(f"[proxy] Reload interval: {RELOAD_INTERVAL}s ({RELOAD_INTERVAL/3600}h)")

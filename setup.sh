@@ -117,6 +117,9 @@ fi
 
 # 配置 pip 镜像
 if command -v pip3 &>/dev/null; then
+    pip3 config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple 2>/dev/null && info "pip 镜像配置完成" || warn "pip 镜像配置失败"
+fi
+
 # ---------- Step 2: 克隆 hermes-skill-proxy ----------
 info "Step 2/8：克隆 hermes-skill-proxy..."
 git_clone_or_fetch "${PROXY_REPO}" "${PROXY_DIR}"
@@ -206,12 +209,14 @@ d = json.load(sys.stdin)
 skill_ok = d.get('skill_loaded') == True
 status = 'OK' if skill_ok else 'FAIL'
 skill_name = d.get('skill', '')
-print(f\"  skill_loaded : {status} ({skill_name})\")
+hermes_url = d.get('hermes_url', '')
+service_status = d.get('status', '')
+print('  skill_loaded : {} ({})'.format(status, skill_name))
 if not skill_ok:
-    print(f"  WARNING: skill 未加载，请确认已执行：")
-    print(f"    git clone https://github.com/inexbot/inexbot-knowledge-base.git \${HOME}/.hermes/skills/productivity/inexbot-knowledge-base")
-print(f"  hermes_url   : {d.get('hermes_url')}")
-print(f"  status       : {d.get('status')}")
+    print('  WARNING: skill 未加载，请确认已执行：')
+    print('    git clone https://github.com/inexbot/inexbot-knowledge-base.git \${HOME}/.hermes/skills/productivity/inexbot-knowledge-base')
+print('  hermes_url   : {}'.format(hermes_url))
+print('  status       : {}'.format(service_status))
 "
 fi
 
