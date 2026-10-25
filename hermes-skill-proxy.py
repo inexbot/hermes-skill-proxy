@@ -22,10 +22,11 @@ import os
 import json
 import re
 import time
+import hashlib
 import threading
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote as url_quote
+from urllib.parse import quote as url_quote, unquote
 
 from flask import Flask, request, Response
 import requests
@@ -186,17 +187,95 @@ def schedule_reload():
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
+def _kb_url(base_url: str, path: str) -> str:
+    """
+    由 index.json 的 path key 拼出可点击的引用链接。
+
+    ⚠️ index.json 的 key 有两种形态，编码方式相反：
+      - inexbot (doc.inexbot.com)：key **已经是 percent 编码**的
+        （如 /zh/%E6%8A%80%E6%9C%AF%E8%B5%84%E6%96%99）。
+        若再 url_quote() 一次 → % 变成 %25 → 双重编码 → **链接 404**。
+      - inexbot-open (open.inexbot.com)：key 是**解码后的明文中文**
+        （如 /zh/04.上位机/01.C++/），必须编码后才能用。
+
+    判据：key 里已含 '%' 说明它已是编码态 → 保留既有转义，只编码其余字符；
+    否则按明文整体编码。两个 KB 实测均为 200。
+    """
+    if "%" in path:
+        return base_url + url_quote(path, safe="/%")
+    return base_url + url_quote(path, safe="/")
+
+
+def _md_slug_candidates(path: str) -> list[str]:
+    """
+    解析 index 里的 path -> md 文件名候选（按优先级）。
+
+    ⚠️ 跨组件隐式契约：crawler 的 slugify() 决定了 md 文件名，
+    这里必须与各 crawler 保持一致，否则正文读不到（会静默退化成
+    index.json 里的 800 字摘要，或抛 OSError 导致整个请求 500）。
+
+    各 crawler 的 slugify() 实况：
+      - inexbot (doc.inexbot.com, VitePress v2 alpha)：
+          unquote -> replace("/","-") -> 去 [<>:"\|?*] -> 超 200 字节则 MD5 截断
+          路径本身是 URL 编码的（/zh/%E4%BA%A7...），所以必须先 unquote。
+      - inexbot-open (open.inexbot.com)：
+          replace("/","-") -> 去 [<>:"\|?*]，**不做 unquote、不做长度截断**
+          路径已是解码后的中文，且各 locale 前缀（zh-/en-/kr-）是路径的一部分。
+
+    这里对两个 KB 都把「解码版」和「原样版」都作为候选，逐个试，
+    谁先存在用谁 —— 这样即便某个 crawler 改了 slug 规则也不会全线崩。
+    """
+    raw = path.lstrip("/")
+    candidates = []
+
+    def _add(s: str):
+        if s and s not in candidates:
+            candidates.append(s)
+
+    # 1) 未经解码（原样）—— open KB 的真实文件名就是这个
+    _add(raw.replace("/", "-").replace("\\", "-"))
+    # 2) URL 解码后 —— inexbot KB 的真实文件名
+    try:
+        decoded = unquote(raw)
+    except Exception:
+        decoded = raw
+    _add(decoded.replace("/", "-").replace("\\", "-"))
+    # 3) 二次编码（旧版 proxy 逻辑，保留作兜底）
+    try:
+        _add(url_quote(raw, safe="").replace("/", "-"))
+    except Exception:
+        pass
+
+    # 清洗非法字符 + 超长时按 crawler 的规则截断
+    out = []
+    for s in candidates:
+        try:
+            s = re.sub(r'[<>:"|?*]', '', s)
+        except Exception:
+            pass
+        if len(s.encode("utf-8")) > 200:
+            head = s.encode("utf-8")[:184].decode("utf-8", errors="ignore")
+            s = f"{head}-{hashlib.md5(s.encode('utf-8')).hexdigest()[:8]}"
+        out.append(s)
+    return out
+
+
 def read_full_content(kb_name: str, path: str, query: str = "") -> str:
     """读取文档内容，提取与 query 最相关的段落（不是只取开头）"""
     md_dir = _kb_md_dirs.get(kb_name)
     if not md_dir:
         return ""
-    slug = path.lstrip("/").replace("/", "-")
-    md_path = md_dir / f"{slug}.md"
-    if not md_path.exists():
-        slug2 = url_quote(path.lstrip("/"), safe="").replace("/", "-")
-        md_path = md_dir / f"{slug2}.md"
-    if not md_path.exists():
+    md_path = None
+    for slug in _md_slug_candidates(path):
+        cand = md_dir / f"{slug}.md"
+        try:
+            if cand.exists():
+                md_path = cand
+                break
+        except OSError:
+            # 文件名过长 (Errno 36) 等 —— 降级到下一个候选，不要冒泡成 500
+            continue
+    if md_path is None:
         return ""
 
     try:
@@ -320,7 +399,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         results.append({
             "title": item.get("title", ""),
             "path": path,
-            "url": base_url + url_quote(path, safe="/"),
+            "url": _kb_url(base_url, path),
             "description": item.get("description", ""),
             "content_snippet": snippet[:4000],  # 从8000降到4000，减少噪声
             "kb_name": kb_name,
