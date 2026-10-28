@@ -19,6 +19,7 @@ Hermes API Proxy — 双知识库检索 + 注入 system prompt
 """
 
 import os
+import sys
 import json
 import re
 import time
@@ -180,10 +181,23 @@ def _rebuild_system_keywords():
 # ── 定时重载 ──────────────────────────────────────────────────────────────
 
 def schedule_reload():
-    load_all_indexes()
-    t = threading.Timer(RELOAD_INTERVAL, schedule_reload)
-    t.daemon = True
-    t.start()
+    """
+    定时重载索引。
+
+    ⚠️ 重载失败（如 index.json 正被爬虫重写、JSON 解析失败）会让本函数抛异常，
+    而 threading.Timer 的回调异常**不会**重新排期 —— 定时器链条就此断裂，
+    proxy 会永久停留在旧索引上（实测曾出现 48 小时不重载）。
+    所以这里必须 try/except，并且**无论如何都要重新排下一次定时器**。
+    """
+    try:
+        load_all_indexes()
+    except Exception as e:
+        # 打印到 stderr（stdout 在 systemd 下是块缓冲，journal 里可能延迟很久才出现）
+        print(f"[proxy] RELOAD FAILED: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    finally:
+        t = threading.Timer(RELOAD_INTERVAL, schedule_reload)
+        t.daemon = True
+        t.start()
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
