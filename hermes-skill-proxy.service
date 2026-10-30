@@ -5,15 +5,14 @@ Wants=hermes-gateway.service
 
 [Service]
 Type=simple
-User=inexbot
-WorkingDirectory=/home/inexbot
-Environment=
-  PROXY_PORT=8643
-  HERMES_URL=http://localhost:8642
-  HERMES_API_KEY=hermes-website-search
-  SKILL_NAME=inexbot-knowledge-base
+User=@USER@
+WorkingDirectory=@PROXY_DIR@
+Environment="PROXY_PORT=8643"
+Environment="HERMES_URL=http://localhost:8642"
+Environment="HERMES_API_KEY=hermes-website-search"
+Environment="SKILL_NAME=inexbot-knowledge-base"
 
-ExecStart=/usr/bin/python3 /home/inexbot/hermes-skill-proxy/hermes-skill-proxy.py
+ExecStart=/usr/bin/python3 @PROXY_DIR@/hermes-skill-proxy.py
 Restart=always
 RestartSec=5
 

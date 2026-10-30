@@ -155,8 +155,15 @@ if [[ ! -f "${SERVICE_FILE}" ]]; then
     error "服务文件不存在：${SERVICE_FILE}"
 fi
 
-# 替换服务文件中的路径为实际用户目录
-sed "s|/home/inexbot|${HOME}|g" "${SERVICE_FILE}" > /tmp/hermes-skill-proxy.service
+# 替换服务文件中的占位符为实际用户和目录
+# ⚠️ 模板里用 @USER@ / @PROXY_DIR@ 占位，不能靠 sed 替换硬编码路径：
+#    旧模板写死 `User=inexbot` / `WorkingDirectory=/home/inexbot`，
+#    setup.sh 只 sed 了 /home/inexbot → 装出来的 unit 仍然 User=inexbot，
+#    而该用户在大多数机器上根本不存在 → systemd 起不来（280 failed）。
+#    现在 User 和 WorkingDirectory 都用占位符，由本脚本按实际环境渲染。
+sed -e "s|@USER@|$(id -un)|g" \
+    -e "s|@PROXY_DIR@|${PROXY_DIR}|g" \
+    "${SERVICE_FILE}" > /tmp/hermes-skill-proxy.service
 sudo -S -p '' cp /tmp/hermes-skill-proxy.service "${SERVICE_DEST}"
 sudo -S -p '' systemctl daemon-reload
 info "systemd 服务文件已安装"
