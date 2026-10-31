@@ -39,6 +39,13 @@ HERMES_URL = os.getenv("HERMES_URL", "http://localhost:8642")
 HERMES_API_KEY = os.getenv("HERMES_API_KEY", "hermes-website-search")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "8643"))
 
+# 上游请求超时（秒）。
+# ⚠️ 2026-10-31：原先硬编码 timeout=120，但 KB 检索后注入的 system prompt
+# 约 12k–20k 字符，实测 gateway 需要 30–140s 才返回 —— 120s 会让
+# 「查手册类问题」随机失败成 HTTP 502（实测 4 次里挂 2 次）。
+# 改为可配置，默认 300s（可用 HERMES_TIMEOUT 环境变量覆盖）。
+HERMES_TIMEOUT = int(os.getenv("HERMES_TIMEOUT", "300"))
+
 # 双知识库配置
 KB_CONFIGS = [
     {
@@ -611,7 +618,7 @@ def proxy_request():
             f"{HERMES_URL}/v1/chat/completions",
             json=new_body,
             headers=headers,
-            timeout=120,
+            timeout=HERMES_TIMEOUT,
             stream=True,
         )
     except Exception as e:
