@@ -245,6 +245,11 @@ def _md_slug_candidates(path: str) -> list[str]:
 
     这里对两个 KB 都把「解码版」和「原样版」都作为候选，逐个试，
     谁先存在用谁 —— 这样即便某个 crawler 改了 slug 规则也不会全线崩。
+
+    ⚠️ 返回值是**不带 .md 后缀的裸 slug** —— 调用方必须自己拼后缀：
+        md_dir / f"{slug}.md"        # ← proxy 内部 read_full_content() 的写法
+    漏拼后缀会让自写审计脚本报「slug 契约 0/558 + 孤儿 = 全量」的假阳性
+    （陷阱 11，已复发 4 次；详见 shared-proxy-service-pitfalls.md §陷阱 11）。
     """
     raw = path.lstrip("/")
     candidates = []
