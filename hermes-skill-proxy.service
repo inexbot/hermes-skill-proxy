@@ -11,6 +11,7 @@ Environment="PROXY_PORT=8643"
 Environment="HERMES_URL=http://localhost:8642"
 Environment="HERMES_API_KEY=hermes-website-search"
 Environment="SKILL_NAME=inexbot-knowledge-base"
+Environment="HERMES_TIMEOUT=1800"
 
 ExecStart=/usr/bin/python3 @PROXY_DIR@/hermes-skill-proxy.py
 Restart=always
