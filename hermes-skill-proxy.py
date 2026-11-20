@@ -54,6 +54,10 @@ KB_CONFIGS = [
         "base_url": "https://doc.inexbot.com",
         "index_file": Path.home() / ".hermes" / "kb" / "inexbot" / "index.json",
         "md_dir": Path.home() / ".hermes" / "kb" / "inexbot" / "md",
+        # ⚠️ 2026-11-19：上游 doc.inexbot.com 改成了「.html 后缀路由」——
+        #    裸路径一律 404。链接后缀由 index 条目的 url_suffix 字段逐条决定
+        #    （普通页 ".html" / 目录页 "/index.html"）。
+        "url_suffix_mode": "html",
     },
     {
         "name": "inexbot-open",
@@ -61,6 +65,8 @@ KB_CONFIGS = [
         "base_url": "https://open.inexbot.com",
         "index_file": Path.home() / ".hermes" / "kb" / "inexbot-open" / "index.json",
         "md_dir": Path.home() / ".hermes" / "kb" / "inexbot-open" / "md",
+        # ⚠️ open.inexbot.com **未改**（2026-11-19 实测裸路径仍 200）
+        "url_suffix_mode": "none",
     },
 ]
 
@@ -112,6 +118,10 @@ _index_data: dict = {}
 _kb_urls: dict = {}
 # 每个 KB 的 md_dir（用于读取完整文档）
 _kb_md_dirs: dict = {}
+# 每个 KB 的 URL 后缀模式：
+#   "html" -> 官方链接需要 .html 后缀（doc.inexbot.com，2026-11-19 起）
+#   "none" -> 官方链接就是裸路径（open.inexbot.com，实测裸路径仍 200）
+_kb_url_modes: dict = {}
 
 def load_single_index(cfg: dict):
     """加载单个知识库索引"""
@@ -128,6 +138,7 @@ def load_single_index(cfg: dict):
     _index_data[name] = raw
     _kb_urls[name] = cfg["base_url"]
     _kb_md_dirs[name] = cfg.get("md_dir")
+    _kb_url_modes[name] = cfg.get("url_suffix_mode", "none")
 
     scores = {}
     for path, item in raw.items():
@@ -208,7 +219,7 @@ def schedule_reload():
 
 # ── 内存检索 ──────────────────────────────────────────────────────────────
 
-def _kb_url(base_url: str, path: str) -> str:
+def _kb_url(base_url: str, path: str, suffix: str = "") -> str:
     """
     由 index.json 的 path key 拼出可点击的引用链接。
 
@@ -221,10 +232,25 @@ def _kb_url(base_url: str, path: str) -> str:
 
     判据：key 里已含 '%' 说明它已是编码态 → 保留既有转义，只编码其余字符；
     否则按明文整体编码。两个 KB 实测均为 200。
+
+    ⚠️ 2026-11-19：doc.inexbot.com 改成了「.html 后缀路由」——
+      - 裸路径 `/zh/xxx` 现在一律 **404**
+      - 普通页要 `/zh/xxx.html`，目录页要 `/zh/xxx/index.html`
+    而 index 的 key 是**去掉后缀**的相对路径，**丢掉了目录页/普通页的区分**。
+    ⇒ suffix 由调用方从 index 条目的 `url_suffix` 字段传入：
+      ".html" -> 普通页；"/index.html" -> 目录页
+    ⚠️ open.inexbot.com **未改**（实测裸路径仍 200）⇒ 那边不要加后缀。
     """
     if "%" in path:
-        return base_url + url_quote(path, safe="/%")
-    return base_url + url_quote(path, safe="/")
+        url = base_url + url_quote(path, safe="/%")
+    else:
+        url = base_url + url_quote(path, safe="/")
+    if suffix:
+        # 目录页后缀 "/index.html" 自身带前导斜杠；普通页 ".html" 不带
+        if suffix.startswith("/"):
+            return url.rstrip("/") + suffix
+        return url + suffix
+    return url
 
 
 def _md_slug_candidates(path: str) -> list[str]:
@@ -425,7 +451,7 @@ def search_single_kb(kb_name: str, query: str, top_k: int = 3) -> list:
         results.append({
             "title": item.get("title", ""),
             "path": path,
-            "url": _kb_url(base_url, path),
+            "url": _kb_url(base_url, path, item.get("url_suffix", "")),
             "description": item.get("description", ""),
             "content_snippet": snippet[:4000],  # 从8000降到4000，减少噪声
             "kb_name": kb_name,
